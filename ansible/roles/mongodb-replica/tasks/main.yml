@@ -6,11 +6,11 @@
     shell: /sbin/nologin
     create_home: false
 
-- name: apt install needed packages
-  apt:
-    name: jq
-    update_cache: yes
-    state: latest
+# - name: apt install needed packages
+#   apt:
+#     name: jq
+#     update_cache: yes
+#     state: latest
 
 - name: install mongodb binaries
   include_role:
@@ -24,14 +24,14 @@
       creates: bin
       extracts: yes
 
-# - name: copy confd files
-#   copy:
-#     src: etc
-#     dest: /etc
-#     owner: root
-#     group: root
-#     mode: preserve
-#     directory_mode: u=rwx,g=rx,o=
+- name: copy app files
+  copy:
+    src: opt/app/current/
+    dest: /opt/app/current/
+    owner: root
+    group: svc
+    mode: preserve
+    directory_mode: u=rwx,g=rx,o=
   
 - name: install confd files
   include_role:

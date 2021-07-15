@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 User=mongod
 Group=svc
-Environment="OPTIONS=-f /opt/app/current/conf/mongodb/mongod.conf"
+Environment="OPTIONS=-f /data/mongodb-conf/mongod.conf"
 ExecStart=/opt/mongodb/current/bin/mongod $OPTIONS
 PermissionsStartOnly=true
 Type=simple

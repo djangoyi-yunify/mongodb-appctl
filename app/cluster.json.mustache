@@ -1,0 +1,43 @@
+{
+    "name": {{cluster.name}},
+    "description": {{cluster.description}},
+    "vxnet": {{cluster.vxnet}},
+    "multi_zone_policy": "round_robin",
+    "advanced_actions": [
+        "scale_horizontal"
+    ],
+    "nodes": [{
+        "role": "repl_node",
+        "container": {
+            "type": "kvm",
+            "zone": "pek3",
+            "image": "img-x3tafado"
+        },
+        "instance_class": {{cluster.repl_node.instance_class}},
+        "count": {{cluster.repl_node.count}},
+        "cpu": {{cluster.repl_node.cpu}},
+        "memory": {{cluster.repl_node.memory}},
+        "volume": {
+            "size": {{cluster.repl_node.volume_size}},
+            "mount_point": "/data",
+            "class": {{cluster.repl_node.volume_class}},
+            "filesystem": "ext4"
+        },
+        "vertical_scaling_policy": "sequential",
+        "services": {
+            "init": {
+                "cmd": "appctl init"
+            },
+            "start": {
+                "cmd": "appctl start"
+            },
+            "stop": {
+                "cmd": "appctl stop"
+            }
+        }
+    }],
+    "env": {
+        "cluster.userpass": {{env.cluster.userpass}},
+        "conf.net.port": {{env.conf.net.port}}
+    }
+}
