@@ -2,16 +2,16 @@
     "name": {{cluster.name}},
     "description": {{cluster.description}},
     "vxnet": {{cluster.vxnet}},
-    "multi_zone_policy": "round_robin",
     "advanced_actions": [
-        "scale_horizontal"
+        "scale_horizontal",
+        "change_vxnet"
     ],
     "nodes": [{
         "role": "repl_node",
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-x3tafado"
+            "image": "img-wpfth0sv"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
