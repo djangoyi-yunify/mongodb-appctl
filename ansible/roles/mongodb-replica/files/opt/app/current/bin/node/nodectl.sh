@@ -4,12 +4,28 @@ MONGODB_DATA_PATH=/data/mongodb-data
 MONGODB_LOG_PATH=/data/mongodb-logs
 MONGODB_CONF_PATH=/data/mongodb-conf
 
-checkNodeFirstCreated() {
-  test -f $NODECTL_NODE_FIRST_CREATE
-}
+# runMongoCmd
+# desc run mongo shell
+# $1: script string
+# $2-x: option
+# -u username, -p passwd
+# -P port, -H ip
+runMongoCmd() {
+  local cmd="/opt/mongodb/current/bin/mongo --quiet"
+  local jsstr="$1"
+  
+  shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      "-u") cmd="$cmd --authenticationDatabase admin --username $2";;
+      "-p") cmd="$cmd --password $2";;
+      "-P") cmd="$cmd --port $2";;
+      "-H") cmd="$cmd --host $2";;
+    esac
+    shift 2
+  done
 
-checkReplNeedInit() {
-  checkNodeFirstCreated && [ $ADDING_HOSTS_FLAG = "false" ]
+  timeout --preserve-status 5 echo "$jsstr" | $cmd
 }
 
 # createMongodCfg
@@ -47,7 +63,6 @@ replication:
   replSetName: repl
 MONGOD_CONF
 
-if checkReplNeedInit; then
   cat > $MONGODB_CONF_PATH/mongod-repl-init.conf <<MONGOD_CONF
 systemLog:
   destination: file
@@ -66,7 +81,6 @@ replication:
   oplogSizeMB: 2048
   replSetName: repl
 MONGOD_CONF
-fi
 }
 
 checkCfgChange() {
@@ -94,6 +108,7 @@ initCluster() {
 
 initNode() {
   # lxc check
+  createMongodConf
   _initNode
 }
 
@@ -112,26 +127,67 @@ checkNetInfoChange() {
   [ ! "$oldstr" = "$curstr" ] || return 1
 }
 
+# getSid
+# desc: get sid from NODE_LIST item
+# $1: a NODE_LIST item (5|192.168.1.2)
+# output: sid
+getSid() {
+  echo $(echo $1 | cut -d'|' -f1)
+}
+
+# sortHostList
+# input
+#  $1-n: hosts array
+# output
+#  sorted array, like 'v1 v2 v3 ...'
+sortHostList() {
+  echo $@ | tr ' ' '\n' | sort
+}
+
+# msInitRepl
+# init replicaset
+#  first node: priority 2
+#  other node: priority 1
+#  last node: priority 0, hidden true
+msInitRepl() {
+  local slist=($(sortHostList ${NODE_LIST[@]}))
+  local cnt=${#slist[@]}
+  # only first node can do init action
+  [ $(getSid ${slist[0]}) = $MY_SID ] || return 0
+  
+  for((i=0; i<$cnt; i++)); do
+    echo ${slist[i]}
+  done 
+}
+
 start() {
   isNodeInitialized || initNode
-  if checkNodeFirstCreated; then
-    createMongodConf
-    if [ ! $ADDING_HOSTS_FLAG = "true" ]; then
-      log "init the replica"
-    fi
+  # if checkNodeFirstCreated; then
+  #   createMongodConf
+  #   if [ ! $ADDING_HOSTS_FLAG = "true" ]; then
+  #     log "init the replica"
+  #   fi
+  #   rm -f $NODECTL_NODE_FIRST_CREATE
+  # else
+  #   if [ $CHANGE_VXNET_FLAG = "true" ]; then
+  #     #checkNetInfoChange
+  #     log "change net info"
+  #     #saveNetInfo
+  #   elif [ $VERTICAL_SCALING_FLAG = "true" ]; then
+  #     log "vertical scaling"
+  #   else
+  #     log "normal stop-start"
+  #   fi
+  # fi
+  _start
+  if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
-  else
-    if [ $CHANGE_VXNET_FLAG = "true" ]; then
-      #checkNetInfoChange
-      log "change net info"
-      #saveNetInfo
-    elif [ $VERTICAL_SCALING_FLAG = "true" ]; then
-      log "vertical scaling"
-    else
-      log "normal stop-start"
-    fi
+    if [ $ADDING_HOSTS_FLAG = "true" ]; then log "adding node done"; return; fi
+    log "init replica begin ..."
+    msInitRepl
+    log "add db users"
+    log "init replica done"
   fi
-  #_start
 }
 
 stop() {
