@@ -60,7 +60,7 @@ operationProfiling:
   slowOpThresholdMs: 200
 replication:
   oplogSizeMB: 2048
-  replSetName: repl
+  replSetName: $RS_NAME
 MONGOD_CONF
 
   cat > $MONGODB_CONF_PATH/mongod-repl-init.conf <<MONGOD_CONF
@@ -79,7 +79,7 @@ storage:
   engine: wiredTiger
 replication:
   oplogSizeMB: 2048
-  replSetName: repl
+  replSetName: $RS_NAME
 MONGOD_CONF
 }
 
@@ -108,7 +108,6 @@ initCluster() {
 
 initNode() {
   # lxc check
-  createMongodConf
   _initNode
 }
 
@@ -135,6 +134,10 @@ getSid() {
   echo $(echo $1 | cut -d'|' -f1)
 }
 
+getIp() {
+  echo $(echo $1 | cut -d'|' -f2)
+}
+
 # sortHostList
 # input
 #  $1-n: hosts array
@@ -155,9 +158,77 @@ msInitRepl() {
   # only first node can do init action
   [ $(getSid ${slist[0]}) = $MY_SID ] || return 0
   
+  local curmem=''
+  local memberstr=''
   for((i=0; i<$cnt; i++)); do
-    echo ${slist[i]}
-  done 
+    if [ $i -eq 0 ]; then
+      curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 2}"
+    elif [ $i -eq $((cnt-1)) ]; then
+      curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 0, hidden: true}"
+    else
+      curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 1}"
+    fi
+    
+    if [ $i -eq 0 ]; then
+      memberstr=$curmem
+    else
+      memberstr="$memberstr,$curmem"
+    fi
+  done
+
+  local initjs=$(cat <<EOF
+rs.initiate({
+  _id:"$RS_NAME",
+  members:[$memberstr]
+})
+EOF
+  )
+
+  runMongoCmd "$initjs" -P $CONF_NET_PORT
+}
+
+msInitRoRepl() {
+  local slist=($(sortHostList ${NODE_RO_LIST[@]}))
+  local cnt=${#slist[@]}
+  # only first node can do init action
+  [ $(getSid ${slist[0]}) = $MY_SID ] || return 0
+  
+  local curmem=''
+  local memberstr=''
+  for((i=0; i<$cnt; i++)); do
+    curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\"}"
+    
+    if [ $i -eq 0 ]; then
+      memberstr=$curmem
+    else
+      memberstr="$memberstr,$curmem"
+    fi
+  done
+
+  local initjs=$(cat <<EOF
+rs.initiate({
+  _id:"$RS_RO_NAME",
+  members:[$memberstr]
+})
+EOF
+  )
+
+  echo "initjs"
+}
+
+msInitUsers() {
+  local jsstr=$(cat <<EOF
+admin = db.getSiblingDB("admin")
+admin.createUser(
+  {
+    user: "$QC_USER",
+    pwd: "$(cat $QC_PASS_FILE)",
+    roles: [ { role: "root", db: "admin" } ]
+  }
+)
+EOF
+)
+  echo "$jsstr"
 }
 
 start() {
@@ -179,6 +250,7 @@ start() {
   #     log "normal stop-start"
   #   fi
   # fi
+  if [ -f $NODECTL_NODE_FIRST_CREATE ]; then createMongodConf; fi
   _start
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
