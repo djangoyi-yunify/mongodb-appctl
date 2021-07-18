@@ -114,8 +114,8 @@
             "type": "array",
             "properties": [
                 {
-                    "key": "cluster.userpass",
-                    "label": "User Password",
+                    "key": "db.userpass",
+                    "label": "DB User Password",
                     "description": "The passowrd of user 'root'",
                     "type": "password",
                     "pattern": "(?=.*\\d)(?=.*[a-z])(?=.*[A-Z]).{8,32}",

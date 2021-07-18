@@ -88,7 +88,7 @@ checkCfgChange() {
 }
 
 NODECTL_NODE_FIRST_CREATE="/data/appctl/data/nodectl.node.first.create"
-QC_PASS_FILE="/data/appctl/data/qc_pass"
+DB_QC_PASS_FILE="/data/appctl/data/qc_pass"
 initCluster() {
   _initCluster
 
@@ -103,7 +103,7 @@ initCluster() {
   touch $NODECTL_NODE_FIRST_CREATE
   #qc_pass
   local encrypted=$(echo -n ${CLUSTER_ID}${GLOBAL_UUID} | sha256sum | base64)
-  echo ${encrypted:0:16} > $QC_PASS_FILE
+  echo ${encrypted:0:16} > $DB_QC_PASS_FILE
 }
 
 initNode() {
@@ -221,14 +221,32 @@ msInitUsers() {
 admin = db.getSiblingDB("admin")
 admin.createUser(
   {
-    user: "$QC_USER",
-    pwd: "$(cat $QC_PASS_FILE)",
+    user: "$DB_QC_USER",
+    pwd: "$(cat $DB_QC_PASS_FILE)",
     roles: [ { role: "root", db: "admin" } ]
   }
 )
 EOF
+  )
+  runMongoCmd "$jsstr" -P $CONF_NET_PORT
+
+  jsstr=$(cat <<EOF
+admin = db.getSiblingDB("admin")
+admin.createUser(
+  {
+    user: "$DB_ROOT_USER",
+    pwd: "$DB_ROOT_PWD",
+    roles: [ { role: "root", db: "admin" } ]
+  }
 )
-  echo "$jsstr"
+EOF
+  )
+  runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
+}
+
+checkNodeCanDoReplInit() {
+  local slist=($(sortHostList ${NODE_LIST[@]}))
+  test $(getSid ${slist[0]}) = $MY_SID
 }
 
 start() {
@@ -255,9 +273,11 @@ start() {
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
     if [ $ADDING_HOSTS_FLAG = "true" ]; then log "adding node done"; return; fi
+    if ! checkNodeCanDoReplInit; then log "init replica: skip this node"; return; fi
     log "init replica begin ..."
     msInitRepl
     log "add db users"
+    msInitUsers
     log "init replica done"
   fi
 }

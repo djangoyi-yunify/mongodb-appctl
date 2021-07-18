@@ -11,7 +11,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-swlda3ke"
+            "image": "img-vchxhehv"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
@@ -37,7 +37,7 @@
         }
     }],
     "env": {
-        "cluster.userpass": {{env.cluster.userpass}},
+        "db.userpass": {{env.db.userpass}},
         "conf.net.port": {{env.conf.net.port}}
     }
 }
