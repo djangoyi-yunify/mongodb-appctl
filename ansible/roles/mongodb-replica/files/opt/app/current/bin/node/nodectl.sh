@@ -83,6 +83,65 @@ replication:
 MONGOD_CONF
 }
 
+createMongodRoConf() {
+  cat > $MONGODB_CONF_PATH/mongod.conf <<MONGOD_CONF
+systemLog:
+  destination: file
+  path: $MONGODB_LOG_PATH/mongod.log
+  logAppend: true
+  logRotate: reopen
+net:
+  port: ${CONF_NET_PORT}
+  bindIp: 0.0.0.0
+  maxIncomingConnections: 51200
+  compression:
+    compressors: snappy
+security:
+  keyFile: $MONGODB_CONF_PATH/repl.key
+  authorization: enabled
+storage:
+  dbPath: $MONGODB_DATA_PATH
+  journal:
+    enabled: true
+  engine: wiredTiger
+  wiredTiger:
+    engineConfig:
+      cacheSizeGB: 2048
+operationProfiling:
+  slowOpThresholdMs: 200
+replication:
+  oplogSizeMB: 2048
+  replSetName: $RS_RO_NAME
+MONGOD_CONF
+
+  cat > $MONGODB_CONF_PATH/mongod-repl-init.conf <<MONGOD_CONF
+systemLog:
+  destination: file
+  path: $MONGODB_LOG_PATH/mongod.log
+  logAppend: true
+  logRotate: reopen
+net:
+  port: ${CONF_MAINTAIN_NET_PORT}
+  bindIp: 0.0.0.0
+storage:
+  dbPath: $MONGODB_DATA_PATH
+  journal:
+    enabled: true
+  engine: wiredTiger
+replication:
+  oplogSizeMB: 2048
+  replSetName: $RS_RO_NAME
+MONGOD_CONF
+}
+
+nodeCreateMongodConf() {
+  if [ $MY_ROLE = "repl_node" ]; then
+    createMongodConf
+  else
+    createMongodRoConf
+  fi
+}
+
 checkCfgChange() {
   :
 }
@@ -216,6 +275,14 @@ EOF
   echo "initjs"
 }
 
+nodeMsInitRepl() {
+  if [ $MY_ROLE = "repl_node" ]; then
+    msInitRepl
+  else
+    msInitRoRepl
+  fi
+}
+
 msInitUsers() {
   local jsstr=$(cat <<EOF
 admin = db.getSiblingDB("admin")
@@ -245,8 +312,36 @@ EOF
 }
 
 checkNodeCanDoReplInit() {
-  local slist=($(sortHostList ${NODE_LIST[@]}))
+  local slist=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=($(sortHostList ${NODE_LIST[@]}))
+  else
+    slist=($(sortHostList ${NODE_RO_LIST[@]}))
+  fi
   test $(getSid ${slist[0]}) = $MY_SID
+}
+
+# msIsReplStatusOk
+# check if replia set's status is ok
+# 1 primary, other's secondary
+msIsReplStatusOk() {
+  local tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" $@ | jq .members[].stateStr)
+  local pcnt=$(echo "$tmpstr" | grep PRIMARY | wc -l)
+  local scnt=$(echo "$tmpstr" | grep SECONDARY | wc -l)
+  local allcnt=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    allcnt=${#NODE_LIST[@]}
+  else
+    allcnt=${#NODE_RO_LIST[@]}
+  fi
+  test $pcnt -eq 1
+  test $((pcnt+scnt)) -eq $allcnt
+}
+
+msIsMeMaster() {
+  local tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" $@)
+  local pname=$(echo $tmpstr | jq '.members[] | select(.stateStr=="PRIMARY") | .name' | sed s/\"//g)
+  test "$pname" = "$MY_IP:$CONF_NET_PORT"
 }
 
 start() {
@@ -268,16 +363,18 @@ start() {
   #     log "normal stop-start"
   #   fi
   # fi
-  if [ -f $NODECTL_NODE_FIRST_CREATE ]; then createMongodConf; fi
+  if [ -f $NODECTL_NODE_FIRST_CREATE ]; then nodeCreateMongodConf; fi
   _start
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
     if [ $ADDING_HOSTS_FLAG = "true" ]; then log "adding node done"; return; fi
     if ! checkNodeCanDoReplInit; then log "init replica: skip this node"; return; fi
     log "init replica begin ..."
-    msInitRepl
+    retry 60 3 0 nodeMsInitRepl
+    retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT
+    retry 60 3 0 msIsMeMaster -P $CONF_NET_PORT
     log "add db users"
-    msInitUsers
+    retry 60 3 0 msInitUsers
     log "init replica done"
   fi
 }

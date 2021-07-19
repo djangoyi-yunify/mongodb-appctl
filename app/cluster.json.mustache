@@ -11,7 +11,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-vchxhehv"
+            "image": "img-if9mdvbe"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
@@ -21,6 +21,35 @@
             "size": {{cluster.repl_node.volume_size}},
             "mount_point": "/data",
             "class": {{cluster.repl_node.volume_class}},
+            "filesystem": "ext4"
+        },
+        "vertical_scaling_policy": "sequential",
+        "services": {
+            "init": {
+                "cmd": "appctl init"
+            },
+            "start": {
+                "cmd": "appctl start"
+            },
+            "stop": {
+                "cmd": "appctl stop"
+            }
+        }
+    },{
+        "role": "ro_node",
+        "container": {
+            "type": "kvm",
+            "zone": "pek3",
+            "image": "img-if9mdvbe"
+        },
+        "instance_class": {{cluster.ro_node.instance_class}},
+        "count": {{cluster.ro_node.count}},
+        "cpu": {{cluster.ro_node.cpu}},
+        "memory": {{cluster.ro_node.memory}},
+        "volume": {
+            "size": {{cluster.ro_node.volume_size}},
+            "mount_point": "/data",
+            "class": {{cluster.ro_node.volume_class}},
             "filesystem": "ext4"
         },
         "vertical_scaling_policy": "sequential",
