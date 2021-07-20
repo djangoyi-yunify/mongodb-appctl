@@ -31,115 +31,62 @@ runMongoCmd() {
 # createMongodCfg
 # desc: create mongod.conf
 # file: mongod.conf, mongod-admin.conf
-# location: /opt/app/current/conf/mongodb
+# location: MONGODB_CONF_PATH=/data/mongodb-conf
 createMongodConf() {
-  cat > $MONGODB_CONF_PATH/mongod.conf <<MONGOD_CONF
-systemLog:
-  destination: file
-  path: $MONGODB_LOG_PATH/mongod.log
-  logAppend: true
-  logRotate: reopen
-net:
-  port: ${CONF_NET_PORT}
-  bindIp: 0.0.0.0
-  maxIncomingConnections: 51200
-  compression:
-    compressors: snappy
-security:
-  keyFile: $MONGODB_CONF_PATH/repl.key
-  authorization: enabled
-storage:
-  dbPath: $MONGODB_DATA_PATH
-  journal:
-    enabled: true
-  engine: wiredTiger
-  wiredTiger:
-    engineConfig:
-      cacheSizeGB: 2048
-operationProfiling:
-  slowOpThresholdMs: 200
-replication:
-  oplogSizeMB: 2048
-  replSetName: $RS_NAME
-MONGOD_CONF
-
-  cat > $MONGODB_CONF_PATH/mongod-repl-init.conf <<MONGOD_CONF
-systemLog:
-  destination: file
-  path: $MONGODB_LOG_PATH/mongod.log
-  logAppend: true
-  logRotate: reopen
-net:
-  port: ${CONF_MAINTAIN_NET_PORT}
-  bindIp: 0.0.0.0
-storage:
-  dbPath: $MONGODB_DATA_PATH
-  journal:
-    enabled: true
-  engine: wiredTiger
-replication:
-  oplogSizeMB: 2048
-  replSetName: $RS_NAME
-MONGOD_CONF
-}
-
-createMongodRoConf() {
-  cat > $MONGODB_CONF_PATH/mongod.conf <<MONGOD_CONF
-systemLog:
-  destination: file
-  path: $MONGODB_LOG_PATH/mongod.log
-  logAppend: true
-  logRotate: reopen
-net:
-  port: ${CONF_NET_PORT}
-  bindIp: 0.0.0.0
-  maxIncomingConnections: 51200
-  compression:
-    compressors: snappy
-security:
-  keyFile: $MONGODB_CONF_PATH/repl.key
-  authorization: enabled
-storage:
-  dbPath: $MONGODB_DATA_PATH
-  journal:
-    enabled: true
-  engine: wiredTiger
-  wiredTiger:
-    engineConfig:
-      cacheSizeGB: 2048
-operationProfiling:
-  slowOpThresholdMs: 200
-replication:
-  oplogSizeMB: 2048
-  replSetName: $RS_RO_NAME
-MONGOD_CONF
-
-  cat > $MONGODB_CONF_PATH/mongod-repl-init.conf <<MONGOD_CONF
-systemLog:
-  destination: file
-  path: $MONGODB_LOG_PATH/mongod.log
-  logAppend: true
-  logRotate: reopen
-net:
-  port: ${CONF_MAINTAIN_NET_PORT}
-  bindIp: 0.0.0.0
-storage:
-  dbPath: $MONGODB_DATA_PATH
-  journal:
-    enabled: true
-  engine: wiredTiger
-replication:
-  oplogSizeMB: 2048
-  replSetName: $RS_RO_NAME
-MONGOD_CONF
-}
-
-nodeCreateMongodConf() {
+  local rsname=''
   if [ $MY_ROLE = "repl_node" ]; then
-    createMongodConf
+    rsname=$RS_NAME
   else
-    createMongodRoConf
+    rsname=$RS_RO_NAME
   fi
+  cat > $MONGODB_CONF_PATH/mongod.conf <<MONGOD_CONF
+systemLog:
+  destination: file
+  path: $MONGODB_LOG_PATH/mongod.log
+  logAppend: true
+  logRotate: reopen
+net:
+  port: ${CONF_NET_PORT}
+  bindIp: 0.0.0.0
+  maxIncomingConnections: 51200
+  compression:
+    compressors: snappy
+security:
+  keyFile: $MONGODB_CONF_PATH/repl.key
+  authorization: enabled
+storage:
+  dbPath: $MONGODB_DATA_PATH
+  journal:
+    enabled: true
+  engine: wiredTiger
+  wiredTiger:
+    engineConfig:
+      cacheSizeGB: 2048
+operationProfiling:
+  slowOpThresholdMs: 200
+replication:
+  oplogSizeMB: 2048
+  replSetName: $rsname
+MONGOD_CONF
+
+  cat > $MONGODB_CONF_PATH/mongod-admin.conf <<MONGOD_CONF
+systemLog:
+  destination: file
+  path: $MONGODB_LOG_PATH/mongod.log
+  logAppend: true
+  logRotate: reopen
+net:
+  port: ${CONF_MAINTAIN_NET_PORT}
+  bindIp: 0.0.0.0
+storage:
+  dbPath: $MONGODB_DATA_PATH
+  journal:
+    enabled: true
+  engine: wiredTiger
+replication:
+  oplogSizeMB: 2048
+  replSetName: $rsname
+MONGOD_CONF
 }
 
 checkCfgChange() {
@@ -211,8 +158,20 @@ sortHostList() {
 #  first node: priority 2
 #  other node: priority 1
 #  last node: priority 0, hidden true
+# init readonly replicaset
+#  first node: priority 2
+#  other node: priority 1
 msInitRepl() {
-  local slist=($(sortHostList ${NODE_LIST[@]}))
+  local slist=''
+  local rsname=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=($(sortHostList ${NODE_LIST[@]}))
+    rsname=$RS_NAME
+  else
+    slist=($(sortHostList ${NODE_RO_LIST[@]}))
+    rsname=$RS_RO_NAME
+  fi
+  
   local cnt=${#slist[@]}
   # only first node can do init action
   [ $(getSid ${slist[0]}) = $MY_SID ] || return 0
@@ -223,7 +182,11 @@ msInitRepl() {
     if [ $i -eq 0 ]; then
       curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 2}"
     elif [ $i -eq $((cnt-1)) ]; then
-      curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 0, hidden: true}"
+      if [ $MY_ROLE = "repl_node" ]; then
+        curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 0, hidden: true}"
+      else
+        curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 1}"
+      fi
     else
       curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\",priority: 1}"
     fi
@@ -237,50 +200,13 @@ msInitRepl() {
 
   local initjs=$(cat <<EOF
 rs.initiate({
-  _id:"$RS_NAME",
+  _id:"$rsname",
   members:[$memberstr]
 })
 EOF
   )
 
   runMongoCmd "$initjs" -P $CONF_NET_PORT
-}
-
-msInitRoRepl() {
-  local slist=($(sortHostList ${NODE_RO_LIST[@]}))
-  local cnt=${#slist[@]}
-  # only first node can do init action
-  [ $(getSid ${slist[0]}) = $MY_SID ] || return 0
-  
-  local curmem=''
-  local memberstr=''
-  for((i=0; i<$cnt; i++)); do
-    curmem="{_id:$i,host:\"$(getIp ${slist[i]}):$CONF_NET_PORT\"}"
-    
-    if [ $i -eq 0 ]; then
-      memberstr=$curmem
-    else
-      memberstr="$memberstr,$curmem"
-    fi
-  done
-
-  local initjs=$(cat <<EOF
-rs.initiate({
-  _id:"$RS_RO_NAME",
-  members:[$memberstr]
-})
-EOF
-  )
-
-  echo "initjs"
-}
-
-nodeMsInitRepl() {
-  if [ $MY_ROLE = "repl_node" ]; then
-    msInitRepl
-  else
-    msInitRoRepl
-  fi
 }
 
 msInitUsers() {
@@ -346,6 +272,7 @@ msIsMeMaster() {
 
 start() {
   isNodeInitialized || initNode
+  createMongodConf
   # if checkNodeFirstCreated; then
   #   createMongodConf
   #   if [ ! $ADDING_HOSTS_FLAG = "true" ]; then
@@ -363,14 +290,13 @@ start() {
   #     log "normal stop-start"
   #   fi
   # fi
-  if [ -f $NODECTL_NODE_FIRST_CREATE ]; then nodeCreateMongodConf; fi
   _start
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
     if [ $ADDING_HOSTS_FLAG = "true" ]; then log "adding node done"; return; fi
     if ! checkNodeCanDoReplInit; then log "init replica: skip this node"; return; fi
     log "init replica begin ..."
-    retry 60 3 0 nodeMsInitRepl
+    retry 60 3 0 msInitRepl
     retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT
     retry 60 3 0 msIsMeMaster -P $CONF_NET_PORT
     log "add db users"
