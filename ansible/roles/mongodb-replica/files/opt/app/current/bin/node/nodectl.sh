@@ -144,6 +144,10 @@ getIp() {
   echo $(echo $1 | cut -d'|' -f2)
 }
 
+getNodeId() {
+  echo $(echo $1 | cut -d'|' -f3)
+}
+
 # sortHostList
 # input
 #  $1-n: hosts array
@@ -270,6 +274,39 @@ msIsMeMaster() {
   test "$pname" = "$MY_IP:$CONF_NET_PORT"
 }
 
+getNodesOrder() {
+  local slist=''
+  local cnt=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=(${NODE_LIST[@]})
+    cnt=${#NODE_LIST[@]}
+  else
+    slist=(${NODE_RO_LIST[@]})
+    cnt=${#NODE_RO_LIST[@]}
+  fi
+  local tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE))
+  local curstate=''
+  local curip=''
+  local reslist=''
+  local masternode=''
+  for((i=0; i<$cnt; i++)); do
+    curip=$(getIp ${slist[i]})
+    curstate=$(echo $tmpstr | jq '.members[] | select(.name | test("'$curip'")) | .stateStr' | sed s/\"//g)
+    if [ $curstate = "PRIMARY" ]; then
+      masternode=$(getNodeId ${slist[i]})
+    else
+      reslist="$reslist$(getNodeId ${slist[i]}),"
+    fi
+  done
+  if [ -z $masternode ]; then
+    reslist=${reslist: 0:-1}
+  else
+    reslist="$reslist$masternode"
+  fi
+  log "action"
+  echo $reslist
+}
+
 start() {
   isNodeInitialized || initNode
   createMongodConf
@@ -302,9 +339,13 @@ start() {
     log "add db users"
     retry 60 3 0 msInitUsers
     log "init replica done"
+  elif [ $VERTICAL_SCALING_FLAG = "true" ]; then
+    log "vertical scaling begin ..."
+    retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
+    log "vertical scaling done"
   fi
 }
 
 stop() {
-  :
+  _stop
 }
