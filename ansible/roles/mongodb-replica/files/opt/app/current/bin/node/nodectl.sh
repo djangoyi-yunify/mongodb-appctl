@@ -83,9 +83,8 @@ storage:
   journal:
     enabled: true
   engine: wiredTiger
-replication:
-  oplogSizeMB: 2048
-  replSetName: $rsname
+processManagement:
+   fork: true
 MONGOD_CONF
 }
 
@@ -114,12 +113,24 @@ initCluster() {
 
 initNode() {
   # lxc check
+  systemd-detect-virt -cq && test -d /data
   _initNode
 }
 
 NET_INFO_FILE="/data/appctl/data/netinfo"
 saveNetInfo() {
-  echo "$MY_IP:$CONF_NET_PORT" > $NET_INFO_FILE
+  local slist=''
+  local rsname=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=(${NODE_LIST[@]})
+  else
+    slist=(${NODE_RO_LIST[@]})
+  fi
+  local cnt=${#slist[@]}
+  : > $NET_INFO_FILE
+  for((i=0; i<$cnt; i++)); do
+    echo $(getIp ${slist[i]}):$CONF_NET_PORT $(getNodeId ${slist[i]}) >> $NET_INFO_FILE
+  done
 }
 
 checkNetInfoChange() {
@@ -279,11 +290,10 @@ getNodesOrder() {
   local cnt=''
   if [ $MY_ROLE = "repl_node" ]; then
     slist=(${NODE_LIST[@]})
-    cnt=${#NODE_LIST[@]}
   else
     slist=(${NODE_RO_LIST[@]})
-    cnt=${#NODE_RO_LIST[@]}
   fi
+  cnt=${#slist[@]}
   local tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE))
   local curstate=''
   local curip=''
@@ -307,29 +317,98 @@ getNodesOrder() {
   echo $reslist
 }
 
+msGetReplCfgFromLocal() {
+  local jsstr=$(cat <<EOF
+mydb = db.getSiblingDB("local")
+JSON.stringify(mydb.system.replset.findOne())
+EOF
+  )
+  runMongoCmd "$jsstr" -P $CONF_MAINTAIN_NET_PORT | sed '1d'
+}
+
+msUpdateReplCfgToLocal() {
+  local rsname=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    rsname=$RS_NAME
+  else
+    rsname=$RS_RO_NAME
+  fi
+  local jsstr=$(cat <<EOF
+newlist=[$1]
+mydb = db.getSiblingDB('local')
+cfg = mydb.system.replset.findOne()
+cnt = cfg.members.length
+for(i=0; i<cnt; i++) {
+  cfg.members[i].host=newlist[i]
+}
+mydb.system.replset.update({"_id":"$rsname"},cfg)
+EOF
+  )
+  runMongoCmd "$jsstr" -P $CONF_MAINTAIN_NET_PORT
+}
+
+MONGOD_BIN=/opt/mongodb/current/bin/mongod
+shellStartMongodForAdmin() {
+  # start mongod in admin mode
+  su -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf" mongod
+}
+
+shellStopMongodForAdmin() {
+  # stop mongod in admin mode
+  su -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf --shutdown" mongod
+}
+
+changeNodeNetInfo() {
+  # start mongod in admin mode
+  shellStartMongodForAdmin
+
+  local replcfg=''
+  retry 60 3 0 msGetReplCfgFromLocal
+  replcfg=$(msGetReplCfgFromLocal)
+
+  local slist=''
+  local cnt=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=(${NODE_LIST[@]})
+  else
+    slist=(${NODE_RO_LIST[@]})
+  fi
+  cnt=${#slist[@]}
+  local oldinfo=$(cat $NET_INFO_FILE)
+  local tmpstr=''
+  local newlist=''
+  for((i=0; i<$cnt; i++)); do
+    # ip:port
+    tmpstr=$(echo "$replcfg" | jq ".members[$i] | .host" | sed s/\"//g)
+    # nodeid
+    tmpstr=$(echo "$oldinfo" | sed -n /$tmpstr/p | cut -d' ' -f2)
+    # newip
+    tmpstr=$(echo ${slist[@]} | grep -o '[[:digit:].]\+|'$tmpstr | cut -d'|' -f1)
+    # result
+    newlist="$newlist\"$tmpstr:$CONF_NET_PORT\","
+  done
+  # java array: "ip:port","ip:port","ip:port"
+  newlist=${newlist:0:-1}
+  msUpdateReplCfgToLocal "$newlist"
+
+  # stop mongod in admin mode
+  shellStopMongodForAdmin
+}
+
 start() {
   isNodeInitialized || initNode
   createMongodConf
-  # if checkNodeFirstCreated; then
-  #   createMongodConf
-  #   if [ ! $ADDING_HOSTS_FLAG = "true" ]; then
-  #     log "init the replica"
-  #   fi
-  #   rm -f $NODECTL_NODE_FIRST_CREATE
-  # else
-  #   if [ $CHANGE_VXNET_FLAG = "true" ]; then
-  #     #checkNetInfoChange
-  #     log "change net info"
-  #     #saveNetInfo
-  #   elif [ $VERTICAL_SCALING_FLAG = "true" ]; then
-  #     log "vertical scaling"
-  #   else
-  #     log "normal stop-start"
-  #   fi
-  # fi
+  if [ $CHANGE_VXNET_FLAG = "true" ]; then
+    log "change net info begin ..."
+    changeNodeNetInfo
+    log "save changed net info"
+    saveNetInfo
+    log "change net info done"
+  fi
   _start
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
+    saveNetInfo
     if [ $ADDING_HOSTS_FLAG = "true" ]; then log "adding node done"; return; fi
     if ! checkNodeCanDoReplInit; then log "init replica: skip this node"; return; fi
     log "init replica begin ..."
