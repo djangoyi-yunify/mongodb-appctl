@@ -49,8 +49,6 @@ net:
   port: ${CONF_NET_PORT}
   bindIp: 0.0.0.0
   maxIncomingConnections: 51200
-  compression:
-    compressors: snappy
 security:
   keyFile: $MONGODB_CONF_PATH/repl.key
   authorization: enabled
@@ -89,7 +87,7 @@ MONGOD_CONF
 }
 
 checkCfgChange() {
-  :
+  log "action"
 }
 
 NODECTL_NODE_FIRST_CREATE="/data/appctl/data/nodectl.node.first.create"
@@ -342,20 +340,22 @@ for(i=0; i<cnt; i++) {
   cfg.members[i].host=newlist[i]
 }
 mydb.system.replset.update({"_id":"$rsname"},cfg)
+db.adminCommand({fsync: 1})
 EOF
   )
+  echo "$jsstr"
   runMongoCmd "$jsstr" -P $CONF_MAINTAIN_NET_PORT
 }
 
 MONGOD_BIN=/opt/mongodb/current/bin/mongod
 shellStartMongodForAdmin() {
   # start mongod in admin mode
-  su -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf" mongod
+  runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf"
 }
 
 shellStopMongodForAdmin() {
   # stop mongod in admin mode
-  su -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf --shutdown" mongod
+  runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf --shutdown"
 }
 
 changeNodeNetInfo() {
@@ -399,6 +399,7 @@ start() {
   isNodeInitialized || initNode
   createMongodConf
   if [ $CHANGE_VXNET_FLAG = "true" ]; then
+    curl http://metadata/self/change-vxnet-audit
     log "change net info begin ..."
     changeNodeNetInfo
     log "save changed net info"
@@ -409,7 +410,11 @@ start() {
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
     saveNetInfo
-    if [ $ADDING_HOSTS_FLAG = "true" ]; then log "adding node done"; return; fi
+    if [ $ADDING_HOSTS_FLAG = "true" ]; then
+      curl http://metadata/self/adding-hosts
+      log "adding node done"
+      return 
+    fi
     if ! checkNodeCanDoReplInit; then log "init replica: skip this node"; return; fi
     log "init replica begin ..."
     retry 60 3 0 msInitRepl
@@ -419,6 +424,7 @@ start() {
     retry 60 3 0 msInitUsers
     log "init replica done"
   elif [ $VERTICAL_SCALING_FLAG = "true" ]; then
+    curl http://metadata/vertical-scaling-roles
     log "vertical scaling begin ..."
     retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
     log "vertical scaling done"
@@ -426,5 +432,13 @@ start() {
 }
 
 stop() {
+  local jsstr=$(cat <<EOF
+if(rs.isMaster().ismaster) {
+  rs.stepDown()
+}
+db.adminCommand({fsync: 1, lock: true})
+EOF
+  )
+  runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
   _stop
 }
