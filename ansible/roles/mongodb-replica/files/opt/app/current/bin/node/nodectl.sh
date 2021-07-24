@@ -278,8 +278,14 @@ msIsReplStatusOk() {
 }
 
 msIsMeMaster() {
-  local tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" $@)
-  local pname=$(echo $tmpstr | jq '.members[] | select(.stateStr=="PRIMARY") | .name' | sed s/\"//g)
+  local tmpstr=$(runMongoCmd "JSON.stringify(rs.status().members)" $@)
+  local pname=$(echo $tmpstr | jq '.[] | select(.stateStr=="PRIMARY") | .name' | sed s/\"//g)
+  test "$pname" = "$MY_IP:$CONF_NET_PORT"
+}
+
+msIsMeHidden() {
+  local tmpstr=$(runMongoCmd "JSON.stringify(rs.conf().members)" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE))
+  local pname=$(echo $tmpstr | jq '.[] | select(.hidden==true) | .host' | sed s/\"//g)
   test "$pname" = "$MY_IP:$CONF_NET_PORT"
 }
 
@@ -446,4 +452,34 @@ EOF
   )
   runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE) || :
   _stop
+}
+
+msAddNodes() {
+  local jsstr=''
+  local cnt=${#ADDING_LIST[@]}
+  for((i=0; i<$cnt; i++)); do
+    jsstr=$jsstr'rs.add({host:"'$(getIp ${ADDING_LIST[i]})\:$CONF_NET_PORT'", priority: 1});'
+  done
+  runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
+}
+
+isHiddenNodeNeedChangeSyncConf() {
+  if [ "$MY_ROLE" = "ro_node" ]; then return 1; fi
+  local cnt=${#ADDING_LIST[@]}
+  if [ $cnt -gt 0 ]; then return 1; fi
+  msIsMeHidden || return 1
+}
+
+scaleOut() {
+  if isHiddenNodeNeedChangeSyncConf; then
+    log "hidden node change sync config"
+    return
+  fi
+  local cnt=${#ADDING_LIST[@]}
+  if [ $cnt -eq 0 ]; then log "other role scale out, skip this node"; return; fi
+
+  if ! msIsMeMaster -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE); then log "add nodes: not master, skip this node"; return; fi
+  log "add nodes begin ..."
+  msAddNodes
+  log "add nodes done"
 }

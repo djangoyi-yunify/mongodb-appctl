@@ -11,7 +11,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-th3ch0x0"
+            "image": "img-u3aej6kg"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
@@ -39,6 +39,10 @@
             "get_nodes_order": {
                 "event": ["upgrade", "rollback", "scale_vertical", "stop"],
                 "cmd": "appctl getNodesOrder"
+            },
+            "scale_out": {
+                "cmd": "appctl scaleOut",
+                "order": 2
             }
         }
     },{
@@ -46,7 +50,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-th3ch0x0"
+            "image": "img-u3aej6kg"
         },
         "instance_class": {{cluster.ro_node.instance_class}},
         "count": {{cluster.ro_node.count}},
@@ -74,6 +78,10 @@
             "get_nodes_order": {
                 "event": ["upgrade", "rollback", "scale_vertical", "stop"],
                 "cmd": "appctl getNodesOrder"
+            },
+            "scale_out": {
+                "cmd": "appctl scaleOut",
+                "order": 1
             }
         }
     }],
