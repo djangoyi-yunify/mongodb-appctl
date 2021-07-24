@@ -340,7 +340,6 @@ for(i=0; i<cnt; i++) {
   cfg.members[i].host=newlist[i]
 }
 mydb.system.replset.update({"_id":"$rsname"},cfg)
-db.adminCommand({fsync: 1})
 EOF
   )
   echo "$jsstr"
@@ -395,11 +394,19 @@ changeNodeNetInfo() {
   shellStopMongodForAdmin
 }
 
+isMyRoleNeedChangeVxnet() {
+  local tmp=$(echo "$CHANGE_VXNET_ROLES" | grep -o "$MY_ROLE")
+  test "$tmp" = "$MY_ROLE"
+}
+
 start() {
   isNodeInitialized || initNode
   createMongodConf
   if [ $CHANGE_VXNET_FLAG = "true" ]; then
-    curl http://metadata/self/change-vxnet-audit
+    if ! isMyRoleNeedChangeVxnet; then
+      log "change net info: skip this node"
+      return 0
+    fi
     log "change net info begin ..."
     changeNodeNetInfo
     log "save changed net info"
@@ -424,7 +431,6 @@ start() {
     retry 60 3 0 msInitUsers
     log "init replica done"
   elif [ $VERTICAL_SCALING_FLAG = "true" ]; then
-    curl http://metadata/vertical-scaling-roles
     log "vertical scaling begin ..."
     retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
     log "vertical scaling done"
@@ -436,9 +442,8 @@ stop() {
 if(rs.isMaster().ismaster) {
   rs.stepDown()
 }
-db.adminCommand({fsync: 1, lock: true})
 EOF
   )
-  runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
+  runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE) || :
   _stop
 }
