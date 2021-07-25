@@ -146,10 +146,10 @@
                             "label": "Node Count",
                             "description": "Number of nodes to be created",
                             "type": "integer",
-                            "min": 1,
+                            "min": 0,
                             "max": 7,
                             "default": 3,
-                            "resource_group": [1, 3, 3],
+                            "resource_group": [0, 1, 1],
                             "required": "yes"
                         },
                         {

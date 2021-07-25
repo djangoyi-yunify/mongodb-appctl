@@ -4,6 +4,9 @@ MONGODB_DATA_PATH=/data/mongodb-data
 MONGODB_LOG_PATH=/data/mongodb-logs
 MONGODB_CONF_PATH=/data/mongodb-conf
 
+# error code
+ERR_GET_PRIMARY_IP=130
+
 # runMongoCmd
 # desc run mongo shell
 # $1: script string
@@ -25,7 +28,7 @@ runMongoCmd() {
     shift 2
   done
 
-  timeout --preserve-status 5 echo "$jsstr" | $cmd
+  timeout --preserve-status 5 $cmd --eval "$jsstr"
 }
 
 # createMongodCfg
@@ -400,6 +403,42 @@ changeNodeNetInfo() {
   shellStopMongodForAdmin
 }
 
+getNodesCnt() {
+  local slist=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=($(sortHostList ${NODE_LIST[@]}))
+  else
+    slist=($(sortHostList ${NODE_RO_LIST[@]}))
+  fi
+  echo ${#slist[@]}
+}
+
+isAddNodesFromZero() {
+  local slist=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=($(sortHostList ${NODE_LIST[@]}))
+  else
+    slist=($(sortHostList ${NODE_RO_LIST[@]}))
+  fi
+  local cnt=''
+  local str1=''
+  local str2=''
+  cnt=${#ADDING_LIST[@]}
+  for((i=0; i<$cnt; i++)); do
+    str1=$str1${slist[i]}'\n'
+  done
+  str1=$(echo "$str1" | sort)
+
+  cnt=${#slist[@]}
+  for((i=0; i<$cnt; i++)); do
+    str2=$str2${slist[i]%|*}'\n'
+  done
+  str2=$(echo "$str2" | sort)
+  echo "$str1"
+  echo "$str2"
+  test "$str1" = "$str2"
+}
+
 isMyRoleNeedChangeVxnet() {
   local tmp=$(echo "$CHANGE_VXNET_ROLES" | grep -o "$MY_ROLE")
   test "$tmp" = "$MY_ROLE"
@@ -423,8 +462,7 @@ start() {
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
     saveNetInfo
-    if [ $ADDING_HOSTS_FLAG = "true" ]; then
-      curl http://metadata/self/adding-hosts
+    if [ $ADDING_HOSTS_FLAG = "true" ] && ! isAddNodesFromZero; then
       log "adding node done"
       return 
     fi
@@ -463,15 +501,94 @@ msAddNodes() {
   runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
 }
 
+msRmNodes() {
+  local cnt=${#DELETING_LIST[@]}
+  local cmpstr=''
+  for((i=0; i<$cnt; i++)); do
+    cmpstr=$cmpstr$(getIp ${#DELETING_LIST[i]})\:$CONF_NET_PORT" "
+  done
+  local jsstr=$(cat <<EOF
+tmpstr="$cmpstr"
+members=[]
+cfg=rs.conf()
+for(i=0;i<cfg.members.length;i++) {
+  if (tmpstr.indexOf(cfg.members[i].host) != -1) {
+    continue
+  }
+  members.push(cfg.members[i])
+}
+cfg.members=members
+rs.reconfig(cfg)
+EOF
+  )
+  echo "$jsstr"
+  runMongoCmd "$jsstr" -H $1 -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
+}
+
+msGetAvailableNodeIp() {
+  local slist=''
+  if [ $MY_ROLE = "repl_node" ]; then
+    slist=(${NODE_LIST[@]})
+  else
+    slist=(${NODE_RO_LIST[@]})
+  fi
+  local cnt=${#slist[@]}
+  local res=''
+  for((i=0; i<$cnt; i++)); do
+    res=$(getIp ${slist[i]})
+    runMongoCmd "rs.status()" -H $res -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE) >/dev/null 2>&1 && break
+  done
+  echo "$res"
+}
+
+msGetReplStatus() {
+  local hostip=$(msGetAvailableNodeIp)
+  local tmpstr=''
+
+  if [ -z "$hostip" ]; then return; fi
+  tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" -H $hostip -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE) 2>/dev/null)
+  echo "$tmpstr"
+}
+
+msGetReplConf() {
+  local hostip=$(msGetAvailableNodeIp)
+  local tmpstr=''
+
+  if [ -z "$hostip" ]; then return; fi
+  tmpstr=$(runMongoCmd "JSON.stringify(rs.conf())" -H $hostip -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE) 2>/dev/null)
+  echo "$tmpstr"
+}
+
+msGetAvailableMasterIp() {
+  local tmpstr=$(msGetReplStatus)
+  tmpstr=$(echo $tmpstr | jq '.members[] | select(.stateStr=="PRIMARY") | .name' |  sed s/\"//g)
+  echo ${tmpstr%:*}
+}
+
+isOtherRoleScaling() {
+  local cnt=''
+  if [ "$1" = "out" ]; then
+    cnt=${#ADDING_LIST[@]}
+  else
+    cnt=${#DELETING_LIST[@]}
+  fi
+  test $cnt -eq 0
+}
+
 isHiddenNodeNeedChangeSyncConf() {
   if [ "$MY_ROLE" = "ro_node" ]; then return 1; fi
-  local cnt=${#ADDING_LIST[@]}
+  local cnt=''
+  if [ "$1" = "add" ]; then
+    cnt=${#ADDING_LIST[@]}
+  else
+    cnt=${#DELETING_LIST[@]}
+  fi
   if [ $cnt -gt 0 ]; then return 1; fi
   msIsMeHidden || return 1
 }
 
 scaleOut() {
-  if isHiddenNodeNeedChangeSyncConf; then
+  if isHiddenNodeNeedChangeSyncConf add; then
     log "hidden node change sync config"
     return
   fi
@@ -482,4 +599,29 @@ scaleOut() {
   log "add nodes begin ..."
   msAddNodes
   log "add nodes done"
+}
+
+precheckScaleIn() {
+  if isOtherRoleScaling in; then log "other role scale in, skip this node"; return; fi
+  local allcnt=$(getNodesCnt)
+
+  log "node count check"
+  log "node role check"
+}
+
+scaleIn() {
+  if isOtherRoleScaling in; then
+    log "other role scale in, do something"
+    return
+  fi
+    
+  local hostip=$(msGetAvailableMasterIp)
+  if [ -z "$hostip" ]; then log "Can't get primary node's ip"; return ERR_GET_PRIMARY_IP; fi
+  log "del nodes begin ..."
+  msRmNodes $hostip
+  log "del nodes done"
+}
+
+mytest() {
+  :
 }
