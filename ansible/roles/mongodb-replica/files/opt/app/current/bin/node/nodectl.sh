@@ -89,10 +89,6 @@ processManagement:
 MONGOD_CONF
 }
 
-checkCfgChange() {
-  log "action"
-}
-
 NODECTL_NODE_FIRST_CREATE="/data/appctl/data/nodectl.node.first.create"
 DB_QC_PASS_FILE="/data/appctl/data/qc_pass"
 initCluster() {
@@ -618,6 +614,32 @@ scaleIn() {
   log "del nodes begin ..."
   msRmNodes $hostip
   log "del nodes done"
+}
+
+checkAndDoMongoRepl() {
+  :
+}
+
+MONGOSHAKE_HOSTS_FILE=/opt/app/current/conf/mongoshake/mongoshake.hosts
+checkAndDoMongoShake() {
+  if [ $MY_ROLE = "repl_node" ]; then log "repl node do nothing"; return; fi
+  local changed=false
+  if [ ! -f $MONGOSHAKE_HOSTS_FILE ]; then
+    changed=true
+  else
+    diff $MONGOSHAKE_HOSTS_FILE $MONGOSHAKE_HOSTS_FILE.new || changed=true
+  fi
+  test $changed = "false" && return
+  # save #2 file
+  cat $MONGOSHAKE_HOSTS_FILE.new > $MONGOSHAKE_HOSTS_FILE
+  log "mongoshake's conf changed, find a proper node to restart the service"
+}
+
+checkConfdChange() {
+  log "mongorepl"
+  checkAndDoMongoRepl
+  log "mongoshake"
+  checkAndDoMongoShake
 }
 
 mytest() {

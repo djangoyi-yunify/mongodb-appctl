@@ -1,3 +1,5 @@
+# confd
+{{- $nodeRole := getv "/host/role" }}
 # cluster
 confd_cluster_global_uuid={{ getv "/cluster/global_uuid" }}
 confd_cluster_id={{ getv "/cluster/cluster_id" }}

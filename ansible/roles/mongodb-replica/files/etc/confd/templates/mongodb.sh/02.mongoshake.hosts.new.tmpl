@@ -1,4 +1,6 @@
-flush > /opt/app/current/conf/mongoshake/mongoshake.hosts.new << SORTEDHOSTS_NEW_FILE
+{{- if eq $nodeRole "ro_node" }}
+flush > /opt/app/current/conf/mongoshake/mongoshake.hosts.new << MONGOSHAKE_HOSTS_NEW_FILE
 SOURCE_IPS=$(echo $(makeSourceList))
 TARGET_IPS=$(echo $(makeTargetList))
-SORTEDHOSTS_NEW_FILE
+MONGOSHAKE_HOSTS_NEW_FILE
+{{- end }}

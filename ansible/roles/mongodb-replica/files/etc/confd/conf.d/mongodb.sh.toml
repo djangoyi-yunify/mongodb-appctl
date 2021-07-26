@@ -5,4 +5,4 @@ mode = "0700"
 keys = [
     "/",
 ]
-reload_cmd = "/opt/app/current/bin/tmpl/mongodb.sh; appctl checkCfgChange"
+reload_cmd = "/opt/app/current/bin/tmpl/mongodb.sh; appctl checkConfdChange"
