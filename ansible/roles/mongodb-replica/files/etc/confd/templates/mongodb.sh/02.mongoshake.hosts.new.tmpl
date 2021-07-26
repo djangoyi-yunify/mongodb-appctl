@@ -1,0 +1,4 @@
+flush > /opt/app/current/conf/mongoshake/mongoshake.hosts.new << SORTEDHOSTS_NEW_FILE
+SOURCE_IPS=$(echo $(makeSourceList))
+TARGET_IPS=$(echo $(makeTargetList))
+SORTEDHOSTS_NEW_FILE

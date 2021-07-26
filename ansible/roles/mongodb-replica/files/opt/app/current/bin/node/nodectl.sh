@@ -425,17 +425,16 @@ isAddNodesFromZero() {
   local str2=''
   cnt=${#ADDING_LIST[@]}
   for((i=0; i<$cnt; i++)); do
-    str1=$str1${slist[i]}'\n'
+    str1=$str1${ADDING_LIST[i]}'\n'
   done
-  str1=$(echo "$str1" | sort)
+  str1=$(echo -e "$str1" | sort)
 
   cnt=${#slist[@]}
   for((i=0; i<$cnt; i++)); do
     str2=$str2${slist[i]%|*}'\n'
   done
-  str2=$(echo "$str2" | sort)
-  echo "$str1"
-  echo "$str2"
+  str2=$(echo -e "$str2" | sort)
+  
   test "$str1" = "$str2"
 }
 
@@ -505,7 +504,7 @@ msRmNodes() {
   local cnt=${#DELETING_LIST[@]}
   local cmpstr=''
   for((i=0; i<$cnt; i++)); do
-    cmpstr=$cmpstr$(getIp ${#DELETING_LIST[i]})\:$CONF_NET_PORT" "
+    cmpstr=$cmpstr$(getIp ${DELETING_LIST[i]})\:$CONF_NET_PORT" "
   done
   local jsstr=$(cat <<EOF
 tmpstr="$cmpstr"
@@ -521,7 +520,6 @@ cfg.members=members
 rs.reconfig(cfg)
 EOF
   )
-  echo "$jsstr"
   runMongoCmd "$jsstr" -H $1 -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
 }
 

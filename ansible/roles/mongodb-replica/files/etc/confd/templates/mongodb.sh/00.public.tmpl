@@ -1,0 +1,46 @@
+# cluster
+confd_cluster_global_uuid={{ getv "/cluster/global_uuid" }}
+confd_cluster_id={{ getv "/cluster/cluster_id" }}
+# host
+confd_host_sid={{ getv "/host/sid" }}
+confd_host_ip={{ getv "/host/ip" }}
+confd_host_role={{ getv "/host/role" }}
+# env
+confd_env_conf_net_port={{ getv "/env/conf.net.port" }}
+# cluster hosts
+confd_repl_node_hosts=(
+    {{- range $dir := lsdir "/hosts/repl_node" -}}
+    {{- $ip := printf "/hosts/repl_node/%s/ip" $dir -}}
+    {{- $sid := printf "/hosts/repl_node/%s/sid" $dir -}}
+    {{- $node_id := printf "/hosts/repl_node/%s/node_id" $dir -}}
+    '{{getv $sid}}|{{getv $ip}}|{{getv $node_id}}' {{print}}
+    {{- end -}})
+confd_repl_nodes_cnt=${#confd_repl_node_hosts[@]}
+confd_ro_node_hosts=(
+    {{- range $dir := lsdir "/hosts/ro_node" -}}
+    {{- $ip := printf "/hosts/ro_node/%s/ip" $dir -}}
+    {{- $sid := printf "/hosts/ro_node/%s/sid" $dir -}}
+    {{- $node_id := printf "/hosts/ro_node/%s/node_id" $dir -}}
+    '{{getv $sid}}|{{getv $ip}}|{{getv $node_id}}' {{print}}
+    {{- end -}})
+confd_ro_nodes_cnt=${#confd_ro_node_hosts[@]}
+# function
+getIp() {
+  echo $(echo $1 | cut -d'|' -f2)
+}
+makeSourceList() {
+  local tmpstr=''
+  for((i=0; i<$confd_repl_nodes_cnt; i++)); do
+    tmpstr="$tmpstr$(getIp ${confd_repl_node_hosts[i]})\n"
+  done
+  tmpstr=$(echo -e $tmpstr | sort)
+  echo "$tmpstr"
+}
+makeTargetList() {
+  local tmpstr=''
+  for((i=0; i<$confd_ro_nodes_cnt; i++)); do
+    tmpstr="$tmpstr$(getIp ${confd_ro_node_hosts[i]})\n"
+  done
+  tmpstr=$(echo -e $tmpstr | sort)
+  echo "$tmpstr"
+}
