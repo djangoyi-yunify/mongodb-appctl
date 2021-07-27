@@ -142,18 +142,18 @@ checkNetInfoChange() {
 
 # getSid
 # desc: get sid from NODE_LIST item
-# $1: a NODE_LIST item (5|192.168.1.2)
+# $1: a NODE_LIST item (5/192.168.1.2)
 # output: sid
 getSid() {
-  echo $(echo $1 | cut -d'|' -f1)
+  echo $(echo $1 | cut -d'/' -f1)
 }
 
 getIp() {
-  echo $(echo $1 | cut -d'|' -f2)
+  echo $(echo $1 | cut -d'/' -f2)
 }
 
 getNodeId() {
-  echo $(echo $1 | cut -d'|' -f3)
+  echo $(echo $1 | cut -d'/' -f3)
 }
 
 # sortHostList
@@ -387,7 +387,7 @@ changeNodeNetInfo() {
     # nodeid
     tmpstr=$(echo "$oldinfo" | sed -n /$tmpstr/p | cut -d' ' -f2)
     # newip
-    tmpstr=$(echo ${slist[@]} | grep -o '[[:digit:].]\+|'$tmpstr | cut -d'|' -f1)
+    tmpstr=$(echo ${slist[@]} | grep -o '[[:digit:].]\+/'$tmpstr | cut -d'/' -f1)
     # result
     newlist="$newlist\"$tmpstr:$CONF_NET_PORT\","
   done
@@ -427,7 +427,7 @@ isAddNodesFromZero() {
 
   cnt=${#slist[@]}
   for((i=0; i<$cnt; i++)); do
-    str2=$str2${slist[i]%|*}'\n'
+    str2=$str2${slist[i]%/*}'\n'
   done
   str2=$(echo -e "$str2" | sort)
   
