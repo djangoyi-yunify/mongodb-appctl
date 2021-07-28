@@ -541,25 +541,14 @@ isOtherRoleScaling() {
   test $cnt -eq 0
 }
 
-isHiddenNodeNeedChangeSyncConf() {
-  if [ "$MY_ROLE" = "ro_node" ]; then return 1; fi
-  local cnt=''
-  if [ "$1" = "add" ]; then
-    cnt=${#ADDING_LIST[@]}
-  else
-    cnt=${#DELETING_LIST[@]}
-  fi
-  if [ $cnt -gt 0 ]; then return 1; fi
-  msIsMeHidden || return 1
-}
-
 scaleOut() {
-  if isHiddenNodeNeedChangeSyncConf add; then
-    log "hidden node change sync config"
+  local cnt=${#ADDING_LIST[@]}
+  if isOtherRoleScaling out; then
+    log "other role scale out, skip this node"
     return
   fi
-  local cnt=${#ADDING_LIST[@]}
-  if [ $cnt -eq 0 ]; then log "other role scale out, skip this node"; return; fi
+
+  if [ $MY_ROLE = "ro_node" ]; then createMongoShakeConf; fi
 
   if ! msIsMeMaster -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE); then log "add nodes: not master, skip this node"; return; fi
   log "add nodes begin ..."
@@ -577,7 +566,7 @@ precheckScaleIn() {
 
 scaleIn() {
   if isOtherRoleScaling in; then
-    log "other role scale in, do something"
+    log "other role scale in, skip this node"
     return
   fi
     
@@ -601,7 +590,7 @@ checkAndDoMongoShake() {
 }
 
 checkConfdChange() {
-  :
+  log "come here"
   # if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
   # if [ $VERTICAL_SCALING_FLAG = "true" ] || [ $CHANGE_VXNET_FLAG = "true" ] || [ $ADDING_HOSTS_FLAG = "true" ] || [ $DELETING_HOSTS_FLAG = "true" ]; then log "waiting for change ends ..."; return; fi
   
