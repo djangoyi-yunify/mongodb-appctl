@@ -11,7 +11,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-yn0coadw"
+            "image": "img-rca0n3qc"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
@@ -23,6 +23,7 @@
             "class": {{cluster.repl_node.volume_class}},
             "filesystem": "ext4"
         },
+        "passphraseless":"ssh-rsa",
         "vertical_scaling_policy": "sequential",
         "services": {
             "init": {
@@ -56,7 +57,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-yn0coadw"
+            "image": "img-rca0n3qc"
         },
         "instance_class": {{cluster.ro_node.instance_class}},
         "count": {{cluster.ro_node.count}},

@@ -1,4 +1,4 @@
-{{- if eq $nodeRole "ro_node" }}
+{{- if and (eq $nodeRole "ro_node") (eq $verticalScalingFlag "false") (eq $changeVxnetFlag "false") (eq $addingHostsFlag "false") (eq $deletingHostsFlag "false") }}
 makeSourceList() {
   local tmpstr=''
   local cnt=${#confd_repl_node_hosts[@]}

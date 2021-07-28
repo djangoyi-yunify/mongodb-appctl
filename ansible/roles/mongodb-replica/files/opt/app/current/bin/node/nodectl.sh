@@ -89,6 +89,14 @@ processManagement:
 MONGOD_CONF
 }
 
+MONGOSHAKE_HOSTS_FILE=/opt/app/current/conf/mongoshake/mongoshake.hosts
+createMongoShakeconf() {
+  if [ ! -f $MONGOSHAKE_HOSTS_FILE ]; then
+    cat $MONGOSHAKE_HOSTS_FILE.new > $MONGOSHAKE_HOSTS_FILE
+  fi
+  log "create conf file"
+}
+
 NODECTL_NODE_FIRST_CREATE="/data/appctl/data/nodectl.node.first.create"
 DB_QC_PASS_FILE="/data/appctl/data/qc_pass"
 initCluster() {
@@ -620,26 +628,24 @@ checkAndDoMongoRepl() {
   :
 }
 
-MONGOSHAKE_HOSTS_FILE=/opt/app/current/conf/mongoshake/mongoshake.hosts
 checkAndDoMongoShake() {
-  if [ $MY_ROLE = "repl_node" ]; then log "repl node do nothing"; return; fi
   local changed=false
-  if [ ! -f $MONGOSHAKE_HOSTS_FILE ]; then
-    changed=true
-  else
-    diff $MONGOSHAKE_HOSTS_FILE $MONGOSHAKE_HOSTS_FILE.new || changed=true
-  fi
+  diff $MONGOSHAKE_HOSTS_FILE $MONGOSHAKE_HOSTS_FILE.new || changed=true
   test $changed = "false" && return
-  # save #2 file
-  cat $MONGOSHAKE_HOSTS_FILE.new > $MONGOSHAKE_HOSTS_FILE
+  createMongoShakeconf
   log "mongoshake's conf changed, find a proper node to restart the service"
 }
 
 checkConfdChange() {
+  if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
+  if [ $VERTICAL_SCALING_FLAG = "true" ] || [ $CHANGE_VXNET_FLAG = "true" ] || [ $ADDING_HOSTS_FLAG = "true" ] || [ $DELETING_HOSTS_FLAG = "true" ]; then log "waiting for change ends ..."; return; fi
+  
   log "mongorepl"
   checkAndDoMongoRepl
-  log "mongoshake"
-  checkAndDoMongoShake
+
+  if [ $MY_ROLE = "ro_node" ]; then
+    checkAndDoMongoShake
+  fi
 }
 
 mytest() {

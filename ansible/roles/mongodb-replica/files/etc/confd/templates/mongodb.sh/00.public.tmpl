@@ -9,6 +9,7 @@
 {{- $addingList := "" }}
 {{- $deletingHostsFlag := "" }}
 {{- $deletingList := "" }}
+{{- $currentList := "" }}
 {{- $tmpval := "" }}
 
 {{- if len (ls "/vertical-scaling-roles") }}
@@ -39,6 +40,12 @@
   {{- $tmpval = printf "%s%s/%s/%s " $tmpval $sid $ip $node_id }}
 {{- end }}
 {{- $roList = $tmpval }}
+
+{{- if eq $nodeRole "repl_node" }}
+  {{- $currentList = $replList }}
+{{- else }}
+  {{- $currentList = $roList }}
+{{- end }}
 
 {{- $tmpval = "" }}
 {{- if len (ls "/adding-hosts") }}
@@ -82,6 +89,7 @@ confd_env_db_userpass={{ getv "/env/db.userpass" }}
 # cluster hosts
 confd_repl_node_hosts=({{ printf $replList }})
 confd_ro_node_hosts=({{ printf $roList }})
+confd_cur_node_hosts=({{ printf $currentList }})
 confd_adding_hosts=({{ printf $addingList }})
 confd_deleting_hosts=({{ printf $deletingList }})
 # function
