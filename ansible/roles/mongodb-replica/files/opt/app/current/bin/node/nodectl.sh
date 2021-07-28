@@ -36,12 +36,6 @@ runMongoCmd() {
 # file: mongod.conf, mongod-admin.conf
 # location: MONGODB_CONF_PATH=/data/mongodb-conf
 createMongodConf() {
-  local rsname=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    rsname=$RS_NAME
-  else
-    rsname=$RS_RO_NAME
-  fi
   cat > $MONGODB_CONF_PATH/mongod.conf <<MONGOD_CONF
 systemLog:
   destination: file
@@ -67,7 +61,7 @@ operationProfiling:
   slowOpThresholdMs: 200
 replication:
   oplogSizeMB: 2048
-  replSetName: $rsname
+  replSetName: $RS_NAME
 MONGOD_CONF
 
   cat > $MONGODB_CONF_PATH/mongod-admin.conf <<MONGOD_CONF
@@ -90,7 +84,7 @@ MONGOD_CONF
 }
 
 MONGOSHAKE_HOSTS_FILE=/opt/app/current/conf/mongoshake/mongoshake.hosts
-createMongoShakeconf() {
+createMongoShakeConf() {
   if [ ! -f $MONGOSHAKE_HOSTS_FILE ]; then
     cat $MONGOSHAKE_HOSTS_FILE.new > $MONGOSHAKE_HOSTS_FILE
   fi
@@ -124,17 +118,10 @@ initNode() {
 
 NET_INFO_FILE="/data/appctl/data/netinfo"
 saveNetInfo() {
-  local slist=''
-  local rsname=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=(${NODE_LIST[@]})
-  else
-    slist=(${NODE_RO_LIST[@]})
-  fi
-  local cnt=${#slist[@]}
+  local cnt=${#NODE_CUR_LIST[@]}
   : > $NET_INFO_FILE
   for((i=0; i<$cnt; i++)); do
-    echo $(getIp ${slist[i]}):$CONF_NET_PORT $(getNodeId ${slist[i]}) >> $NET_INFO_FILE
+    echo $(getIp ${NODE_CUR_LIST[i]}):$CONF_NET_PORT $(getNodeId ${NODE_CUR_LIST[i]}) >> $NET_INFO_FILE
   done
 }
 
@@ -182,16 +169,7 @@ sortHostList() {
 #  first node: priority 2
 #  other node: priority 1
 msInitRepl() {
-  local slist=''
-  local rsname=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=($(sortHostList ${NODE_LIST[@]}))
-    rsname=$RS_NAME
-  else
-    slist=($(sortHostList ${NODE_RO_LIST[@]}))
-    rsname=$RS_RO_NAME
-  fi
-  
+  local slist=($(sortHostList ${NODE_CUR_LIST[@]}))
   local cnt=${#slist[@]}
   # only first node can do init action
   [ $(getSid ${slist[0]}) = $MY_SID ] || return 0
@@ -220,7 +198,7 @@ msInitRepl() {
 
   local initjs=$(cat <<EOF
 rs.initiate({
-  _id:"$rsname",
+  _id:"$RS_NAME",
   members:[$memberstr]
 })
 EOF
@@ -259,11 +237,7 @@ EOF
 
 checkNodeCanDoReplInit() {
   local slist=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=($(sortHostList ${NODE_LIST[@]}))
-  else
-    slist=($(sortHostList ${NODE_RO_LIST[@]}))
-  fi
+  slist=($(sortHostList ${NODE_CUR_LIST[@]}))
   test $(getSid ${slist[0]}) = $MY_SID
 }
 
@@ -274,12 +248,7 @@ msIsReplStatusOk() {
   local tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" $@ | jq .members[].stateStr)
   local pcnt=$(echo "$tmpstr" | grep PRIMARY | wc -l)
   local scnt=$(echo "$tmpstr" | grep SECONDARY | wc -l)
-  local allcnt=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    allcnt=${#NODE_LIST[@]}
-  else
-    allcnt=${#NODE_RO_LIST[@]}
-  fi
+  local allcnt=${#NODE_CUR_LIST[@]}
   test $pcnt -eq 1
   test $((pcnt+scnt)) -eq $allcnt
 }
@@ -418,12 +387,6 @@ getNodesCnt() {
 }
 
 isAddNodesFromZero() {
-  local slist=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=($(sortHostList ${NODE_LIST[@]}))
-  else
-    slist=($(sortHostList ${NODE_RO_LIST[@]}))
-  fi
   local cnt=''
   local str1=''
   local str2=''
@@ -433,9 +396,9 @@ isAddNodesFromZero() {
   done
   str1=$(echo -e "$str1" | sort)
 
-  cnt=${#slist[@]}
+  cnt=${#NODE_CUR_LIST[@]}
   for((i=0; i<$cnt; i++)); do
-    str2=$str2${slist[i]%/*}'\n'
+    str2=$str2${NODE_CUR_LIST[i]%/*}'\n'
   done
   str2=$(echo -e "$str2" | sort)
   
@@ -450,6 +413,7 @@ isMyRoleNeedChangeVxnet() {
 start() {
   isNodeInitialized || initNode
   createMongodConf
+  if [ $MY_ROLE = "ro_node" ]; then createMongoShakeConf; fi
   if [ $CHANGE_VXNET_FLAG = "true" ]; then
     if ! isMyRoleNeedChangeVxnet; then
       log "change net info: skip this node"
@@ -637,15 +601,16 @@ checkAndDoMongoShake() {
 }
 
 checkConfdChange() {
-  if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
-  if [ $VERTICAL_SCALING_FLAG = "true" ] || [ $CHANGE_VXNET_FLAG = "true" ] || [ $ADDING_HOSTS_FLAG = "true" ] || [ $DELETING_HOSTS_FLAG = "true" ]; then log "waiting for change ends ..."; return; fi
+  :
+  # if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
+  # if [ $VERTICAL_SCALING_FLAG = "true" ] || [ $CHANGE_VXNET_FLAG = "true" ] || [ $ADDING_HOSTS_FLAG = "true" ] || [ $DELETING_HOSTS_FLAG = "true" ]; then log "waiting for change ends ..."; return; fi
   
-  log "mongorepl"
-  checkAndDoMongoRepl
+  # log "mongorepl"
+  # checkAndDoMongoRepl
 
-  if [ $MY_ROLE = "ro_node" ]; then
-    checkAndDoMongoShake
-  fi
+  # if [ $MY_ROLE = "ro_node" ]; then
+  #   checkAndDoMongoShake
+  # fi
 }
 
 mytest() {
