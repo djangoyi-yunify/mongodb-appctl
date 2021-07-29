@@ -11,7 +11,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-pinyadui"
+            "image": "img-1qcigvlj"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
@@ -56,7 +56,7 @@
         "container": {
             "type": "kvm",
             "zone": "pek3",
-            "image": "img-pinyadui"
+            "image": "img-1qcigvlj"
         },
         "instance_class": {{cluster.ro_node.instance_class}},
         "count": {{cluster.ro_node.count}},
@@ -99,6 +99,7 @@
     }],
     "env": {
         "db.userpass": {{env.db.userpass}},
-        "conf.net.port": {{env.conf.net.port}}
+        "conf.mongod.port": {{env.conf.mongod.port}},
+        "conf.mongod.oplogsize": {{env.conf.mongod.oplogsize}}
     }
 }

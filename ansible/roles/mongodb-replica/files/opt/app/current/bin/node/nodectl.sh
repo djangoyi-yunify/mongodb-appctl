@@ -83,7 +83,7 @@ processManagement:
 MONGOD_CONF
 }
 
-MONGOSHAKE_HOSTS_FILE=/opt/app/current/conf/mongoshake/mongoshake.hosts
+HOSTS_INFO_FILE=/data/appctl/data/hosts.info
 createMongoShakeConf() {
   if [ ! -f $MONGOSHAKE_HOSTS_FILE ]; then
     cat $MONGOSHAKE_HOSTS_FILE.new > $MONGOSHAKE_HOSTS_FILE

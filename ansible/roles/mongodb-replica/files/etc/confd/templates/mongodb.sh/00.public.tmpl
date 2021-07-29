@@ -84,8 +84,9 @@ confd_host_sid={{ getv "/host/sid" }}
 confd_host_ip={{ getv "/host/ip" }}
 confd_host_role={{ $nodeRole }}
 # env
-confd_env_conf_net_port={{ getv "/env/conf.net.port" }}
+confd_env_conf_mongod_port={{ getv "/env/conf.mongod.port" }}
 confd_env_db_userpass={{ getv "/env/db.userpass" }}
+confd_env_conf_mongod_oplogsize={{ getv "/env/conf.mongod.oplogsize" }}
 # cluster hosts
 confd_repl_node_hosts=({{ $replList }})
 confd_ro_node_hosts=({{ $roList }})

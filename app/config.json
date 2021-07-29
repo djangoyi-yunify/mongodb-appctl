@@ -190,11 +190,19 @@
                     "required": "no"
                 },
                 {
-                    "key": "conf.net.port",
+                    "key": "conf.mongod.port",
                     "label": "Listening port",
                     "description": "Listening port",
                     "type": "integer",
                     "default": 27017,
+                    "required": "yes"
+                },
+                {
+                    "key": "conf.mongod.oplogsize",
+                    "label": "oplog size",
+                    "description": "oplog size",
+                    "type": "integer",
+                    "default": 1024,
                     "required": "yes"
                 }
             ]
