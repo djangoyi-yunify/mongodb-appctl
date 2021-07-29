@@ -92,6 +92,7 @@ createMongoShakeConf() {
 }
 
 NODECTL_NODE_FIRST_CREATE="/data/appctl/data/nodectl.node.first.create"
+NODECTL_TRANS_FILE="/data/appctl/data/nodectl.trans"
 DB_QC_PASS_FILE="/data/appctl/data/qc_pass"
 initCluster() {
   _initCluster
@@ -103,8 +104,9 @@ initCluster() {
   echo "$GLOBAL_UUID" | base64 > "$MONGODB_CONF_PATH/repl.key"
   chown mongod:svc $MONGODB_CONF_PATH/repl.key
   chmod 0400 $MONGODB_CONF_PATH/repl.key
-  # first creat flag
+  # files
   touch $NODECTL_NODE_FIRST_CREATE
+  touch $NODECTL_TRANS_FILE
   #qc_pass
   local encrypted=$(echo -n ${CLUSTER_ID}${GLOBAL_UUID} | sha256sum | base64)
   echo ${encrypted:0:16} > $DB_QC_PASS_FILE
@@ -589,17 +591,49 @@ checkAndDoMongoShake() {
   log "mongoshake's conf changed, find a proper node to restart the service"
 }
 
-checkConfdChange() {
-  log "come here"
-  # if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
-  # if [ $VERTICAL_SCALING_FLAG = "true" ] || [ $CHANGE_VXNET_FLAG = "true" ] || [ $ADDING_HOSTS_FLAG = "true" ] || [ $DELETING_HOSTS_FLAG = "true" ]; then log "waiting for change ends ..."; return; fi
-  
-  # log "mongorepl"
-  # checkAndDoMongoRepl
+# recordTransStatus
+# desc: record the transaction's begin flag
+# VERTICAL_SCALING_FLAG 0
+# CHANGE_VXNET_FLAG 1
+# ADDING_HOSTS_FLAG 2
+# DELETING_HOSTS_FLAG 3
+# no detected ""
+TRANS_LIST=(VERTICAL_SCALING_FLAG CHANGE_VXNET_FLAG ADDING_HOSTS_FLAG DELETING_HOSTS_FLAG)
+recordTransStatus() {
+  local tmpstr=""
+  local curtrans=""
+  local cnt=${#TRANS_LIST[@]}
+  for((i=0; i<$cnt; i++)); do
+    tmpstr=$(eval echo \$${TRANS_LIST[i]})
+    if [ $tmpstr = "true" ]; then
+      curtrans=$(cat $NODECTL_TRANS_FILE)
+      test -n "$curtrans" && return
+      echo $i > $NODECTL_TRANS_FILE
+      return
+    fi
+  done
+}
 
-  # if [ $MY_ROLE = "ro_node" ]; then
-  #   checkAndDoMongoShake
-  # fi
+detectTransOver() {
+  local curtrans=$(cat $NODECTL_TRANS_FILE)
+  test -z "&curtrans" && return
+  local state=$(eval echo \$${TRANS_LIST[$curtrans]})
+  test $state = "true" && return
+  : > $NODECTL_TRANS_FILE
+  echo $curtrans
+}
+
+checkConfdChange() {
+  if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
+  recordTransStatus
+  curtrans=$(detectTransOver)
+  test -z "$curtrans" && return
+  case ${TRANS_LIST[$curtrans]} in
+    "VERTICAL_SCALING_FLAG") log "vertical scale ends";;
+    "CHANGE_VXNET_FLAG") log "change vxnet ends";;
+    "ADDING_HOSTS_FLAG") log "add nodes ends";;
+    "DELETING_HOSTS_FLAG") log "delete nodes ends";;
+  esac
 }
 
 mytest() {
