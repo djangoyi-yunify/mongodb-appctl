@@ -1,6 +1,4 @@
-subfix=${confd_cluster_global_uuid:0:8}
 flush > /data/appctl/data/confd.mongod.new << CONFD_MONGOD_NEW
-RS_NAME=rs_$subfix
 PORT=$confd_env_conf_mongod_port
 OPLOGSIZE=$confd_env_conf_mongod_oplogsize
 CONFD_MONGOD_NEW

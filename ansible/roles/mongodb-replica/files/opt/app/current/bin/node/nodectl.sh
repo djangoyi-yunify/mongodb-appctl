@@ -3,6 +3,8 @@
 MONGODB_DATA_PATH=/data/mongodb-data
 MONGODB_LOG_PATH=/data/mongodb-logs
 MONGODB_CONF_PATH=/data/mongodb-conf
+HOSTS_INFO_FILE=/data/appctl/data/hosts.info
+CONFD_MONGOD_FILE=/data/appctl/data/confd.mongod
 
 # error code
 ERR_GET_PRIMARY_IP=130
@@ -36,6 +38,8 @@ runMongoCmd() {
 # file: mongod.conf, mongod-admin.conf
 # location: MONGODB_CONF_PATH=/data/mongodb-conf
 createMongodConf() {
+  local port=$(cat $CONFD_MONGOD_FILE | sed '/^PORT=/!d;s/.*=//')
+  local oplogsize=$(cat $CONFD_MONGOD_FILE | sed '/^OPLOGSIZE=/!d;s/.*=//')
   cat > $MONGODB_CONF_PATH/mongod.conf <<MONGOD_CONF
 systemLog:
   destination: file
@@ -43,7 +47,7 @@ systemLog:
   logAppend: true
   logRotate: reopen
 net:
-  port: ${CONF_NET_PORT}
+  port: $port
   bindIp: 0.0.0.0
   maxIncomingConnections: 51200
 security:
@@ -54,13 +58,10 @@ storage:
   journal:
     enabled: true
   engine: wiredTiger
-  wiredTiger:
-    engineConfig:
-      cacheSizeGB: 2048
 operationProfiling:
   slowOpThresholdMs: 200
 replication:
-  oplogSizeMB: 2048
+  oplogSizeMB: $oplogsize
   replSetName: $RS_NAME
 MONGOD_CONF
 
@@ -78,12 +79,13 @@ storage:
   journal:
     enabled: true
   engine: wiredTiger
+operationProfiling:
+  slowOpThresholdMs: 200
 processManagement:
    fork: true
 MONGOD_CONF
 }
 
-HOSTS_INFO_FILE=/data/appctl/data/hosts.info
 createMongoShakeConf() {
   if [ ! -f $MONGOSHAKE_HOSTS_FILE ]; then
     cat $MONGOSHAKE_HOSTS_FILE.new > $MONGOSHAKE_HOSTS_FILE
@@ -98,7 +100,7 @@ initCluster() {
   _initCluster
 
   # folder
-  mkdir -p $MONGODB_DATA_PATH $MONGODB_LOG_PATH $MONGODB_CONF_PATH
+  mkdir -p $MONGODB_DATA_PATH $MONGODB_LOG_PATH
   chown -R mongod:svc $MONGODB_DATA_PATH $MONGODB_LOG_PATH
   # repl.key
   echo "$GLOBAL_UUID" | base64 > "$MONGODB_CONF_PATH/repl.key"
@@ -378,16 +380,6 @@ changeNodeNetInfo() {
   shellStopMongodForAdmin
 }
 
-getNodesCnt() {
-  local slist=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=($(sortHostList ${NODE_LIST[@]}))
-  else
-    slist=($(sortHostList ${NODE_RO_LIST[@]}))
-  fi
-  echo ${#slist[@]}
-}
-
 isAddNodesFromZero() {
   local cnt=''
   local str1=''
@@ -414,8 +406,6 @@ isMyRoleNeedChangeVxnet() {
 
 start() {
   isNodeInitialized || initNode
-  createMongodConf
-  if [ $MY_ROLE = "ro_node" ]; then createMongoShakeConf; fi
   if [ $CHANGE_VXNET_FLAG = "true" ]; then
     if ! isMyRoleNeedChangeVxnet; then
       log "change net info: skip this node"
@@ -423,14 +413,11 @@ start() {
     fi
     log "change net info begin ..."
     changeNodeNetInfo
-    log "save changed net info"
-    saveNetInfo
     log "change net info done"
   fi
   _start
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
-    saveNetInfo
     if [ $ADDING_HOSTS_FLAG = "true" ] && ! isAddNodesFromZero; then
       log "adding node done"
       return 
@@ -467,7 +454,7 @@ msAddNodes() {
   for((i=0; i<$cnt; i++)); do
     jsstr=$jsstr'rs.add({host:"'$(getIp ${ADDING_LIST[i]})\:$CONF_NET_PORT'", priority: 1});'
   done
-  runMongoCmd "$jsstr" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
+  runMongoCmd "$jsstr" -H $1 -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
 }
 
 msRmNodes() {
@@ -494,16 +481,10 @@ EOF
 }
 
 msGetAvailableNodeIp() {
-  local slist=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=(${NODE_LIST[@]})
-  else
-    slist=(${NODE_RO_LIST[@]})
-  fi
-  local cnt=${#slist[@]}
+  local cnt=${#NODE_CUR_LIST[@]}
   local res=''
   for((i=0; i<$cnt; i++)); do
-    res=$(getIp ${slist[i]})
+    res=$(getIp ${NODE_CUR_LIST[i]})
     runMongoCmd "rs.status()" -H $res -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE) >/dev/null 2>&1 && break
   done
   echo "$res"
@@ -544,26 +525,19 @@ isOtherRoleScaling() {
 }
 
 scaleOut() {
-  local cnt=${#ADDING_LIST[@]}
   if isOtherRoleScaling out; then
     log "other role scale out, skip this node"
     return
   fi
 
-  if [ $MY_ROLE = "ro_node" ]; then createMongoShakeConf; fi
-
-  if ! msIsMeMaster -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE); then log "add nodes: not master, skip this node"; return; fi
-  log "add nodes begin ..."
-  msAddNodes
-  log "add nodes done"
-}
-
-precheckScaleIn() {
-  if isOtherRoleScaling in; then log "other role scale in, skip this node"; return; fi
-  local allcnt=$(getNodesCnt)
-
   log "node count check"
   log "node role check"
+
+  local hostip=$(msGetAvailableMasterIp)
+  if [ -z "$hostip" ]; then log "Can't get primary node's ip"; return ERR_GET_PRIMARY_IP; fi
+  log "add nodes begin ..."
+  msAddNodes $hostip
+  log "add nodes done"
 }
 
 scaleIn() {
@@ -571,7 +545,10 @@ scaleIn() {
     log "other role scale in, skip this node"
     return
   fi
-    
+
+  log "node count check"
+  log "node role check"
+  
   local hostip=$(msGetAvailableMasterIp)
   if [ -z "$hostip" ]; then log "Can't get primary node's ip"; return ERR_GET_PRIMARY_IP; fi
   log "del nodes begin ..."
@@ -635,7 +612,14 @@ normalChangeCheck() {
 }
 
 checkConfdChange() {
-  if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
+  if [ ! -d /data/appctl/logs ]; then
+    log "cluster init"
+    cat ${HOSTS_INFO_FILE}.new > $HOSTS_INFO_FILE
+    cat ${CONFD_MONGOD_FILE}.new > $CONFD_MONGOD_FILE
+    log "create mongod config file"
+    createMongodConf
+    return
+  fi
   if normalChangeCheck; then
     log "normal change"
   else

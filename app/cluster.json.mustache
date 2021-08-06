@@ -9,9 +9,10 @@
     "nodes": [{
         "role": "repl_node",
         "container": {
-            "type": "kvm",
+            "type":"lxc",
+            "prefer_type": "lxc",
             "zone": "pek3",
-            "image": "img-707fsf0j"
+            "image": "img-o1e9my8z"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
@@ -42,21 +43,21 @@
                 "cmd": "appctl getNodesOrder"
             },
             "scale_out": {
-                "cmd": "appctl scaleOut",
-                "order": 1
+                "nodes_to_execute_on": 1,
+                "cmd": "appctl scaleOut"
             },
             "scale_in": {
-                "cmd": "appctl scaleIn",
-                "pre_check": "appctl precheckScaleIn",
-                "order": 1
+                "nodes_to_execute_on": 1,
+                "cmd": "appctl scaleIn"
             }
         }
     },{
         "role": "ro_node",
         "container": {
-            "type": "kvm",
+            "type":"lxc",
+            "prefer_type": "lxc",
             "zone": "pek3",
-            "image": "img-707fsf0j"
+            "image": "img-o1e9my8z"
         },
         "instance_class": {{cluster.ro_node.instance_class}},
         "count": {{cluster.ro_node.count}},
@@ -87,13 +88,12 @@
                 "cmd": "appctl getNodesOrder"
             },
             "scale_out": {
-                "cmd": "appctl scaleOut",
-                "order": 2
+                "nodes_to_execute_on": 1,
+                "cmd": "appctl scaleOut"
             },
             "scale_in": {
-                "cmd": "appctl scaleIn",
-                "pre_check": "appctl precheckScaleIn",
-                "order": 2
+                "nodes_to_execute_on": 1,
+                "cmd": "appctl scaleIn"
             }
         }
     }],
