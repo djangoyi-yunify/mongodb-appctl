@@ -616,24 +616,39 @@ recordTransStatus() {
 
 detectTransOver() {
   local curtrans=$(cat $NODECTL_TRANS_FILE)
-  test -z "&curtrans" && return
+  test -z "$curtrans" && return
   local state=$(eval echo \$${TRANS_LIST[$curtrans]})
   test $state = "true" && return
   : > $NODECTL_TRANS_FILE
   echo $curtrans
 }
 
+normalChangeCheck() {
+  local curtrans=$(cat $NODECTL_TRANS_FILE)
+  test -n "$curtrans" && return 1
+  local cnt=${#TRANS_LIST[@]}
+  for((i=0; i<$cnt; i++)); do
+    tmpstr=$(eval echo \$${TRANS_LIST[i]})
+    test $tmpstr = "true" && return 1
+  done
+  :
+}
+
 checkConfdChange() {
   if [ ! -d /data/appctl ]; then log "cluster init, skip"; return; fi
-  recordTransStatus
-  curtrans=$(detectTransOver)
-  test -z "$curtrans" && return
-  case ${TRANS_LIST[$curtrans]} in
-    "VERTICAL_SCALING_FLAG") log "vertical scale ends";;
-    "CHANGE_VXNET_FLAG") log "change vxnet ends";;
-    "ADDING_HOSTS_FLAG") log "add nodes ends";;
-    "DELETING_HOSTS_FLAG") log "delete nodes ends";;
-  esac
+  if normalChangeCheck; then
+    log "normal change"
+  else
+    recordTransStatus
+    curtrans=$(detectTransOver)
+    test -z "$curtrans" && return
+    case ${TRANS_LIST[$curtrans]} in
+      "VERTICAL_SCALING_FLAG") log "vertical scale ends";;
+      "CHANGE_VXNET_FLAG") log "change vxnet ends";;
+      "ADDING_HOSTS_FLAG") log "add nodes ends";;
+      "DELETING_HOSTS_FLAG") log "delete nodes ends";;
+    esac
+  fi
 }
 
 mytest() {

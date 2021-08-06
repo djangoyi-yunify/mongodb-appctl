@@ -1,3 +1,4 @@
+if [ ! -d "/data/appctl" ]; then mkdir -p /data/appctl/{data,log}; fi
 flush > /data/appctl/data/hosts.info.new << HOSTS_INFO_NEW
 PORT=$confd_env_conf_mongod_port
 NODE_LIST=($(echo ${confd_repl_node_hosts[@]}))
