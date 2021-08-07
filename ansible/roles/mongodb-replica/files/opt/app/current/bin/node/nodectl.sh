@@ -34,12 +34,21 @@ runMongoCmd() {
 }
 
 # createMongodCfg
+# get item from ini-like files
+# $1: item-name
+# $2: file path
+getItemFromFile() {
+  local res=$(cat $2 | sed '/^'$1'=/!d;s/.*=//')
+  echo "$res"
+}
+
+# createMongodCfg
 # desc: create mongod.conf
 # file: mongod.conf, mongod-admin.conf
 # location: MONGODB_CONF_PATH=/data/mongodb-conf
 createMongodConf() {
-  local port=$(cat $CONFD_MONGOD_FILE | sed '/^PORT=/!d;s/.*=//')
-  local oplogsize=$(cat $CONFD_MONGOD_FILE | sed '/^OPLOGSIZE=/!d;s/.*=//')
+  local port=$(getItemFromFile PORT $CONFD_MONGOD_FILE)
+  local oplogsize=$(getItemFromFile OPLOGSIZE $CONFD_MONGOD_FILE)
   cat > $MONGODB_CONF_PATH/mongod.conf <<MONGOD_CONF
 systemLog:
   destination: file
@@ -120,15 +129,11 @@ initNode() {
   _initNode
 }
 
-NET_INFO_FILE="/data/appctl/data/netinfo"
-saveNetInfo() {
-  local cnt=${#NODE_CUR_LIST[@]}
-  : > $NET_INFO_FILE
-  for((i=0; i<$cnt; i++)); do
-    echo $(getIp ${NODE_CUR_LIST[i]}):$CONF_NET_PORT $(getNodeId ${NODE_CUR_LIST[i]}) >> $NET_INFO_FILE
-  done
+updateHostInfo() {
+  cat $HOSTS_INFO_FILE.new > $HOSTS_INFO_FILE
 }
 
+# delete
 checkNetInfoChange() {
   if [ ! -f $NET_INFO_FILE ]; then
     saveNetInfo
@@ -418,9 +423,10 @@ start() {
   _start
   if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
     rm -f $NODECTL_NODE_FIRST_CREATE
-    if [ $ADDING_HOSTS_FLAG = "true" ] && ! isAddNodesFromZero; then
-      log "adding node done"
-      return 
+    if [ $ADDING_HOSTS_FLAG = "true" ]; then
+      echo 2 > $NODECTL_TRANS_FILE
+      log "newly added node"
+      if ! isAddNodesFromZero; then return; fi
     fi
     if ! checkNodeCanDoReplInit; then log "init replica: skip this node"; return; fi
     log "init replica begin ..."
@@ -556,16 +562,22 @@ scaleIn() {
   log "del nodes done"
 }
 
+# delete
 checkAndDoMongoRepl() {
   :
 }
 
+# delete
 checkAndDoMongoShake() {
   local changed=false
   diff $MONGOSHAKE_HOSTS_FILE $MONGOSHAKE_HOSTS_FILE.new || changed=true
   test $changed = "false" && return
   createMongoShakeconf
   log "mongoshake's conf changed, find a proper node to restart the service"
+}
+
+restartMongoShake() {
+  log "find a proper node to restart mongoshake"
 }
 
 # recordTransStatus
@@ -611,6 +623,23 @@ normalChangeCheck() {
   :
 }
 
+isAddingNodes() {
+  local list1=($(getItemFromFile NODE_LIST $HOSTS_INFO_FILE))
+  local list2=($(getItemFromFile NODE_LIST $HOSTS_INFO_FILE.new))
+  local cnt1=${#list1[@]}
+  local cnt2=${#list2[@]}
+
+  test "$cnt1" -ne "$cnt2" && return 0
+
+  list1=($(getItemFromFile NODE_RO_LIST $HOSTS_INFO_FILE))
+  list2=($(getItemFromFile NODE_RO_LIST $HOSTS_INFO_FILE.new))
+  cnt1=${#list1[@]}
+  cnt2=${#list2[@]}
+
+  test "$cnt1" -ne "$cnt2" && return 0
+  return 1
+}
+
 checkConfdChange() {
   if [ ! -d /data/appctl/logs ]; then
     log "cluster init"
@@ -621,6 +650,7 @@ checkConfdChange() {
     return
   fi
   if normalChangeCheck; then
+    if isAddingNodes; then log "detect adding nodes, skipping"; return; fi
     log "normal change"
   else
     recordTransStatus
@@ -628,9 +658,9 @@ checkConfdChange() {
     test -z "$curtrans" && return
     case ${TRANS_LIST[$curtrans]} in
       "VERTICAL_SCALING_FLAG") log "vertical scale ends";;
-      "CHANGE_VXNET_FLAG") log "change vxnet ends";;
-      "ADDING_HOSTS_FLAG") log "add nodes ends";;
-      "DELETING_HOSTS_FLAG") log "delete nodes ends";;
+      "CHANGE_VXNET_FLAG") ;&
+      "ADDING_HOSTS_FLAG") ;&
+      "DELETING_HOSTS_FLAG") log "host info changed"; updateHostInfo; restartMongoShake;;
     esac
   fi
 }
