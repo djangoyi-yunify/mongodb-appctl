@@ -102,9 +102,6 @@ createMongoShakeConf() {
   log "create conf file"
 }
 
-# delete
-NODECTL_NODE_CREATE="/data/appctl/data/nodectl.node.create"
-
 NODECTL_MANUAL_FILE="/data/appctl/data/nodectl.manual"
 NODECTL_TRANS_FILE="/data/appctl/data/nodectl.trans"
 DB_QC_PASS_FILE="/data/appctl/data/qc_pass"
@@ -409,7 +406,14 @@ isMyRoleNeedChangeVxnet() {
   test "$tmp" = "$MY_ROLE"
 }
 
+TRANS_LIST=(VERTICAL_SCALING_FLAG CHANGE_VXNET_FLAG ADDING_HOSTS_FLAG DELETING_HOSTS_FLAG)
 MANUAL_LIST=(CREATE NORMAL)
+manualChangeCheck() {
+  local ma=$(cat $NODECTL_MANUAL_FILE)
+  test -z "$ma" && return 1
+  :
+}
+
 isNodeCreate() {
   local ma=$(cat $NODECTL_MANUAL_FILE)
   test "$ma" -eq "0" && return
@@ -442,24 +446,40 @@ doWhenNodeCreate() {
   if ! isAddNodesFromZero; then checkConfdChange; fi
 }
 
+doWhenNormalStart() {
+  if manualChangeCheck; then return; fi
+  local cnt=${#TRANS_LIST[@]}
+  local tmpstr=''
+  for((i=0; i<$cnt; i++)); do
+    tmpstr=$(eval echo \$${TRANS_LIST[i]})
+    test "$tmpstr" = "true" && return
+  done
+  echo 1 > $NODECTL_MANUAL_FILE
+  checkConfdChange
+}
+
+doWhenVerticalScale() {
+  test ! $VERTICAL_SCALING_FLAG = "true" && return
+  log "vertical scaling begin ..."
+  retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
+  log "vertical scaling done"
+}
+
+doWhenChangeVxnet() {
+  test ! $CHANGE_VXNET_FLAG = "true" && return
+  if ! isMyRoleNeedChangeVxnet; then log "change net info: skip this node"; return; fi
+  log "change net info begin ..."
+  changeNodeNetInfo
+  log "change net info done"
+}
+
 start() {
   isNodeInitialized || initNode
-  if [ $CHANGE_VXNET_FLAG = "true" ]; then
-    if ! isMyRoleNeedChangeVxnet; then
-      log "change net info: skip this node"
-      return 0
-    fi
-    log "change net info begin ..."
-    changeNodeNetInfo
-    log "change net info done"
-  fi
+  doWhenChangeVxnet
   _start
+  doWhenVerticalScale
+  doWhenNormalStart
   doWhenNodeCreate
-  if [ $VERTICAL_SCALING_FLAG = "true" ]; then
-    log "vertical scaling begin ..."
-    retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
-    log "vertical scaling done"
-  fi
 }
 
 stop() {
@@ -606,7 +626,6 @@ restartMongoShake() {
 # ADDING_HOSTS_FLAG 2
 # DELETING_HOSTS_FLAG 3
 # no detected ""
-TRANS_LIST=(VERTICAL_SCALING_FLAG CHANGE_VXNET_FLAG ADDING_HOSTS_FLAG DELETING_HOSTS_FLAG)
 recordTransStatus() {
   local tmpstr=""
   local curtrans=""
@@ -629,12 +648,6 @@ detectTransOver() {
   test $state = "true" && return
   : > $NODECTL_TRANS_FILE
   echo $curtrans
-}
-
-manualChangeCheck() {
-  local ma=$(cat $NODECTL_MANUAL_FILE)
-  test -z "$ma" && return 1
-  :
 }
 
 getManualEvent() {

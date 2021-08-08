@@ -9,10 +9,9 @@
     "nodes": [{
         "role": "repl_node",
         "container": {
-            "type":"lxc",
-            "prefer_type": "lxc",
+            "type":"kvm",
             "zone": "pek3",
-            "image": "img-bozj6ba7"
+            "image": "img-y8snab0l"
         },
         "instance_class": {{cluster.repl_node.instance_class}},
         "count": {{cluster.repl_node.count}},
@@ -54,10 +53,9 @@
     },{
         "role": "ro_node",
         "container": {
-            "type":"lxc",
-            "prefer_type": "lxc",
+            "type":"kvm",
             "zone": "pek3",
-            "image": "img-bozj6ba7"
+            "image": "img-y8snab0l"
         },
         "instance_class": {{cluster.ro_node.instance_class}},
         "count": {{cluster.ro_node.count}},

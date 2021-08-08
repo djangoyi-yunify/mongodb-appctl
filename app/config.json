@@ -50,8 +50,9 @@
                             "label": "Instance Class",
                             "description": "The instance type for the cluster node",
                             "type": "integer",
-                            "default": 101,
-                            "range": [101, 201, 301],
+                            "default": 202,
+                            "range": [101, 202, 301],
+                            "resource_group": [101, 202, 301],
                             "required": "yes"
                         },
                         {
@@ -91,7 +92,7 @@
                             "description": "The volume type for each node",
                             "type": "integer",
                             "range": [0, 2, 3, 10],
-                            "default": 0,
+                            "default": 3,
                             "required": "yes"
                         },
                         {
@@ -117,8 +118,9 @@
                             "label": "Instance Class",
                             "description": "The instance type for the cluster node",
                             "type": "integer",
-                            "default": 101,
-                            "range": [101, 201, 301],
+                            "default": 202,
+                            "range": [101, 202, 301],
+                            "resource_group": [101, 202, 301],
                             "required": "yes"
                         },
                         {
@@ -158,7 +160,7 @@
                             "description": "The volume type for each node",
                             "type": "integer",
                             "range": [0, 2, 3, 10],
-                            "default": 0,
+                            "default": 3,
                             "required": "yes"
                         },
                         {
