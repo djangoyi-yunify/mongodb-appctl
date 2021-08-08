@@ -102,7 +102,10 @@ createMongoShakeConf() {
   log "create conf file"
 }
 
-NODECTL_NODE_FIRST_CREATE="/data/appctl/data/nodectl.node.first.create"
+# delete
+NODECTL_NODE_CREATE="/data/appctl/data/nodectl.node.create"
+
+NODECTL_MANUAL_FILE="/data/appctl/data/nodectl.manual"
 NODECTL_TRANS_FILE="/data/appctl/data/nodectl.trans"
 DB_QC_PASS_FILE="/data/appctl/data/qc_pass"
 initCluster() {
@@ -115,9 +118,6 @@ initCluster() {
   echo "$GLOBAL_UUID" | base64 > "$MONGODB_CONF_PATH/repl.key"
   chown mongod:svc $MONGODB_CONF_PATH/repl.key
   chmod 0400 $MONGODB_CONF_PATH/repl.key
-  # files
-  touch $NODECTL_NODE_FIRST_CREATE
-  touch $NODECTL_TRANS_FILE
   #qc_pass
   local encrypted=$(echo -n ${CLUSTER_ID}${GLOBAL_UUID} | sha256sum | base64)
   echo ${encrypted:0:16} > $DB_QC_PASS_FILE
@@ -409,6 +409,39 @@ isMyRoleNeedChangeVxnet() {
   test "$tmp" = "$MY_ROLE"
 }
 
+MANUAL_LIST=(CREATE NORMAL)
+isNodeCreate() {
+  local ma=$(cat $NODECTL_MANUAL_FILE)
+  test "$ma" -eq "0" && return
+  return 1
+}
+
+doWhenNodeCreate() {
+  if ! isNodeCreate; then return; fi
+  if [ $ADDING_HOSTS_FLAG = "true" ]; then
+    : > $NODECTL_MANUAL_FILE
+    echo 2 > $NODECTL_TRANS_FILE
+    log "newly added node"
+    if ! isAddNodesFromZero; then return; fi
+  fi
+
+  if ! checkNodeCanDoReplInit; then
+    log "init replica: skip this node"
+    if ! isAddNodesFromZero; then checkConfdChange; fi
+    return 
+  fi
+
+  log "init replica begin ..."
+  retry 60 3 0 msInitRepl
+  retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT
+  retry 60 3 0 msIsMeMaster -P $CONF_NET_PORT
+  log "add db users"
+  retry 60 3 0 msInitUsers
+  log "init replica done"
+
+  if ! isAddNodesFromZero; then checkConfdChange; fi
+}
+
 start() {
   isNodeInitialized || initNode
   if [ $CHANGE_VXNET_FLAG = "true" ]; then
@@ -421,22 +454,8 @@ start() {
     log "change net info done"
   fi
   _start
-  if [ -f $NODECTL_NODE_FIRST_CREATE ]; then
-    rm -f $NODECTL_NODE_FIRST_CREATE
-    if [ $ADDING_HOSTS_FLAG = "true" ]; then
-      echo 2 > $NODECTL_TRANS_FILE
-      log "newly added node"
-      if ! isAddNodesFromZero; then return; fi
-    fi
-    if ! checkNodeCanDoReplInit; then log "init replica: skip this node"; return; fi
-    log "init replica begin ..."
-    retry 60 3 0 msInitRepl
-    retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT
-    retry 60 3 0 msIsMeMaster -P $CONF_NET_PORT
-    log "add db users"
-    retry 60 3 0 msInitUsers
-    log "init replica done"
-  elif [ $VERTICAL_SCALING_FLAG = "true" ]; then
+  doWhenNodeCreate
+  if [ $VERTICAL_SCALING_FLAG = "true" ]; then
     log "vertical scaling begin ..."
     retry 60 3 0 msIsReplStatusOk -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE)
     log "vertical scaling done"
@@ -612,7 +631,21 @@ detectTransOver() {
   echo $curtrans
 }
 
+manualChangeCheck() {
+  local ma=$(cat $NODECTL_MANUAL_FILE)
+  test -z "$ma" && return 1
+  :
+}
+
+getManualEvent() {
+  local ma=$(cat $NODECTL_MANUAL_FILE)
+  local res=$(echo ${MANUAL_LIST[$ma]})
+  echo $res
+}
+
 normalChangeCheck() {
+  local ma=$(cat $NODECTL_MANUAL_FILE)
+  test -n "$ma" && return 1
   local curtrans=$(cat $NODECTL_TRANS_FILE)
   test -n "$curtrans" && return 1
   local cnt=${#TRANS_LIST[@]}
@@ -643,6 +676,8 @@ isAddingNodes() {
 checkConfdChange() {
   if [ ! -d /data/appctl/logs ]; then
     log "cluster init"
+    echo 0 > $NODECTL_MANUAL_FILE
+    touch $NODECTL_TRANS_FILE
     cat ${HOSTS_INFO_FILE}.new > $HOSTS_INFO_FILE
     cat ${CONFD_MONGOD_FILE}.new > $CONFD_MONGOD_FILE
     log "create mongod config file"
@@ -652,6 +687,10 @@ checkConfdChange() {
   if normalChangeCheck; then
     if isAddingNodes; then log "detect adding nodes, skipping"; return; fi
     log "normal change"
+  elif manualChangeCheck; then
+    manual=$(getManualEvent)
+    : > $NODECTL_MANUAL_FILE
+    log "manual event: $manual"
   else
     recordTransStatus
     curtrans=$(detectTransOver)
