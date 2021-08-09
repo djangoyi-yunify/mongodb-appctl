@@ -130,15 +130,8 @@ updateHostInfo() {
   cat $HOSTS_INFO_FILE.new > $HOSTS_INFO_FILE
 }
 
-# delete
-checkNetInfoChange() {
-  if [ ! -f $NET_INFO_FILE ]; then
-    saveNetInfo
-    return 1
-  fi
-  local oldstr=$(cat $NET_INFO_FILE)
-  local curstr="$MY_IP:$CONF_NET_PORT"
-  [ ! "$oldstr" = "$curstr" ] || return 1
+updateConfdMongodParam() {
+  cat $CONFD_MONGOD_FILE.new > $CONFD_MONGOD_FILE
 }
 
 # getSid
@@ -272,26 +265,19 @@ msIsMeHidden() {
 }
 
 getNodesOrder() {
-  local slist=''
-  local cnt=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=(${NODE_LIST[@]})
-  else
-    slist=(${NODE_RO_LIST[@]})
-  fi
-  cnt=${#slist[@]}
+  local cnt=${#NODE_CUR_LIST[@]}
   local tmpstr=$(runMongoCmd "JSON.stringify(rs.status())" -P $CONF_NET_PORT -u $DB_QC_USER -p $(cat $DB_QC_PASS_FILE))
   local curstate=''
   local curip=''
   local reslist=''
   local masternode=''
   for((i=0; i<$cnt; i++)); do
-    curip=$(getIp ${slist[i]})
+    curip=$(getIp ${NODE_CUR_LIST[i]})
     curstate=$(echo $tmpstr | jq '.members[] | select(.name | test("'$curip'")) | .stateStr' | sed s/\"//g)
     if [ $curstate = "PRIMARY" ]; then
-      masternode=$(getNodeId ${slist[i]})
+      masternode=$(getNodeId ${NODE_CUR_LIST[i]})
     else
-      reslist="$reslist$(getNodeId ${slist[i]}),"
+      reslist="$reslist$(getNodeId ${NODE_CUR_LIST[i]}),"
     fi
   done
   if [ -z $masternode ]; then
@@ -309,16 +295,10 @@ mydb = db.getSiblingDB("local")
 JSON.stringify(mydb.system.replset.findOne())
 EOF
   )
-  runMongoCmd "$jsstr" -P $CONF_MAINTAIN_NET_PORT | sed '1d'
+  runMongoCmd "$jsstr" -P $CONF_MAINTAIN_NET_PORT
 }
 
 msUpdateReplCfgToLocal() {
-  local rsname=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    rsname=$RS_NAME
-  else
-    rsname=$RS_RO_NAME
-  fi
   local jsstr=$(cat <<EOF
 newlist=[$1]
 mydb = db.getSiblingDB('local')
@@ -327,7 +307,7 @@ cnt = cfg.members.length
 for(i=0; i<cnt; i++) {
   cfg.members[i].host=newlist[i]
 }
-mydb.system.replset.update({"_id":"$rsname"},cfg)
+mydb.system.replset.update({"_id":"$RS_NAME"},cfg)
 EOF
   )
   echo "$jsstr"
@@ -337,12 +317,14 @@ EOF
 MONGOD_BIN=/opt/mongodb/current/bin/mongod
 shellStartMongodForAdmin() {
   # start mongod in admin mode
-  runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf"
+  # runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf"
+  runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN --dbpath $MONGODB_DATA_PATH --port $CONF_MAINTAIN_NET_PORT --fork --syslog"
 }
 
 shellStopMongodForAdmin() {
   # stop mongod in admin mode
-  runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf --shutdown"
+  # runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN -f $MONGODB_CONF_PATH/mongod-admin.conf --shutdown"
+  runuser mongod -g svc -s "/bin/bash" -c "$MONGOD_BIN --dbpath $MONGODB_DATA_PATH --port $CONF_MAINTAIN_NET_PORT --fork --syslog --shutdown"
 }
 
 changeNodeNetInfo() {
@@ -353,28 +335,23 @@ changeNodeNetInfo() {
   retry 60 3 0 msGetReplCfgFromLocal
   replcfg=$(msGetReplCfgFromLocal)
 
-  local slist=''
-  local cnt=''
-  if [ $MY_ROLE = "repl_node" ]; then
-    slist=(${NODE_LIST[@]})
-  else
-    slist=(${NODE_RO_LIST[@]})
-  fi
-  cnt=${#slist[@]}
-  local oldinfo=$(cat $NET_INFO_FILE)
+  local cnt=${#NODE_CUR_LIST[@]}
+  local oldinfo=$(getItemFromFile NODE_CUR_LIST $HOSTS_INFO_FILE)
+  local oldport=$(getItemFromFile PORT $HOSTS_INFO_FILE)
   local tmpstr=''
   local newlist=''
   for((i=0; i<$cnt; i++)); do
     # ip:port
     tmpstr=$(echo "$replcfg" | jq ".members[$i] | .host" | sed s/\"//g)
     # nodeid
-    tmpstr=$(echo "$oldinfo" | sed -n /$tmpstr/p | cut -d' ' -f2)
+    tmpstr=$(echo "$oldinfo" | sed 's/\/cln-/:'$oldport'\/cln-/g' | sed 's/ /\n/g' | sed -n /$tmpstr/p)
+    tmpstr=$(getNodeId $tmpstr)
     # newip
-    tmpstr=$(echo ${slist[@]} | grep -o '[[:digit:].]\+/'$tmpstr | cut -d'/' -f1)
+    tmpstr=$(echo ${NODE_CUR_LIST[@]} | grep -o '[[:digit:].]\+/'$tmpstr | cut -d'/' -f1)
     # result
     newlist="$newlist\"$tmpstr:$CONF_NET_PORT\","
   done
-  # java array: "ip:port","ip:port","ip:port"
+  # js array: "ip:port","ip:port","ip:port"
   newlist=${newlist:0:-1}
   msUpdateReplCfgToLocal "$newlist"
 
@@ -415,6 +392,7 @@ manualChangeCheck() {
 }
 
 isNodeCreate() {
+  if ! manualChangeCheck; then return 1; fi
   local ma=$(cat $NODECTL_MANUAL_FILE)
   test "$ma" -eq "0" && return
   return 1
@@ -470,6 +448,7 @@ doWhenChangeVxnet() {
   if ! isMyRoleNeedChangeVxnet; then log "change net info: skip this node"; return; fi
   log "change net info begin ..."
   changeNodeNetInfo
+  updateHostInfo
   log "change net info done"
 }
 
@@ -691,8 +670,8 @@ checkConfdChange() {
     log "cluster init"
     echo 0 > $NODECTL_MANUAL_FILE
     touch $NODECTL_TRANS_FILE
-    cat ${HOSTS_INFO_FILE}.new > $HOSTS_INFO_FILE
-    cat ${CONFD_MONGOD_FILE}.new > $CONFD_MONGOD_FILE
+    updateHostInfo
+    updateConfdMongodParam
     log "create mongod config file"
     createMongodConf
     return
